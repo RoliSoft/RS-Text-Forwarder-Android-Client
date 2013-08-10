@@ -7,7 +7,6 @@
     <string name="action_resume">Resume</string>
     <string name="action_reregister">Register GCM</string>
     <string name="current_status">Current status:</string>
-    <string name="last_push">Last push:</string>
     <string name="title_activity_main">Text Forwarder</string>
     <string name="forwarding_options">Forwarding options</string>
     <string name="forward_sms">Forward SMS</string>

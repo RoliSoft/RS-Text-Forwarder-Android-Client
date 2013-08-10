@@ -25,20 +25,4 @@
             android:layout_alignTop="@+id/textView2"
             android:layout_alignParentRight="true"/>
 
-    <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/last_push"
-            android:id="@+id/textView3"
-            android:layout_below="@+id/textView2"
-            android:layout_alignLeft="@+id/textView2"/>
-
-    <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/not_available"
-            android:id="@+id/textView4"
-            android:layout_below="@+id/textView"
-            android:layout_alignRight="@+id/textView"/>
-
 </RelativeLayout>
