@@ -1,0 +1,4 @@
+/RSTextForwarder/*.apk
+/RSTextForwarder/build/
+/.gradle/1.6/taskArtifacts/
+/key.jks

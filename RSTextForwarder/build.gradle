@@ -1,0 +1,28 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:0.5.+'
+    }
+}
+apply plugin: 'android'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'com.android.support:support-v4:13.0.+'
+    compile files('C:\\Program Files (x86)\\Android\\android-studio\\sdk\\extras\\google\\google_play_services\\libproject\\google-play-services_lib\\libs\\google-play-services.jar')
+}
+
+android {
+    compileSdkVersion 18
+    buildToolsVersion "18.0.1"
+
+    defaultConfig {
+        minSdkVersion 17
+        targetSdkVersion 17
+    }
+}
