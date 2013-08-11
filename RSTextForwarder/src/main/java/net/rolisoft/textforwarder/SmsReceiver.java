@@ -44,30 +44,10 @@ public class SmsReceiver extends BroadcastReceiver {
             List<TextMessage> messages = getMessagesFrom(context, intent);
 
             for (TextMessage msg : messages) {
-                AsyncTask<TextMessage, Void, Void> asyncTask = new AsyncTask<TextMessage, Void, Void>() {
-
-                    @Override
-                    protected Void doInBackground(TextMessage... msgs) {
-                        try {
-                            JSONObject json = MainActivity.sendRequest("send", new ArrayList<NameValuePair>(Arrays.asList(
-                                    new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                                    new BasicNameValuePair("from", msgs[0].from),
-                                    new BasicNameValuePair("body", msgs[0].body)
-                            )));
-                        } catch (ServerError ex) {
-                            MainActivity.displayNotification(context, "Forwarding failed", "Server error: " + ex.toString());
-                        } catch (Exception ex) {
-                            MainActivity.displayNotification(context, "Forwarding failed", "Send error: " + ex.toString());
-                        }
-
-                        return null;
-                    }
-
-                };
-                asyncTask.execute(msg);
+                MainActivity.sendMessageAsync(context, sp, "send", msg.from, msg.body);
             }
         } catch (Exception ex) {
-            MainActivity.displayNotification(context, "Forwarding failed", "Local error: " + ex.toString());
+            MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.toString());
         } finally {
             WakeLocker.release();
         }

@@ -262,4 +262,47 @@ public class MainActivity extends Activity {
 
         return json;
     }
+
+    private static JSONObject sendRequestNoThrow(Context context, String path, List<NameValuePair> postData)
+    {
+        try {
+            return MainActivity.sendRequest(path, postData);
+        } catch (ServerError ex) {
+            MainActivity.displayNotification(context, "Request to " + path + " failed", "Server error: " + ex.toString());
+            return ex.response;
+        } catch (Exception ex) {
+            MainActivity.displayNotification(context, "Request to " + path + " failed", "Send error: " + ex.toString());
+            return null;
+        }
+    }
+
+    public static AsyncTask<Void, Void, JSONObject> sendRequestAsync(final Context context, final String path, final List<NameValuePair> postData)
+    {
+        AsyncTask<Void, Void, JSONObject> asyncTask = new AsyncTask<Void, Void, JSONObject>() {
+
+            @Override
+            protected JSONObject doInBackground(Void... voids)
+            {
+                return sendRequestNoThrow(context, path, postData);
+            }
+
+        };
+        asyncTask.execute();
+        return asyncTask;
+    }
+
+    public static AsyncTask<Void, Void, JSONObject> sendMessageAsync(Context context, SharedPreferences sp, String path, String body)
+    {
+        return sendMessageAsync(context, sp, path, "", body);
+    }
+
+    public static AsyncTask<Void, Void, JSONObject> sendMessageAsync(Context context, SharedPreferences sp, String path, String from, String body)
+    {
+        return sendRequestAsync(context, path, new ArrayList<NameValuePair>(Arrays.asList(
+                new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
+                new BasicNameValuePair("from", from.replace("@", "/")),
+                new BasicNameValuePair("body", body)
+        )));
+    }
+
 }

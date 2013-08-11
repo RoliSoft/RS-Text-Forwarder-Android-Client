@@ -31,18 +31,25 @@ import java.util.concurrent.TimeUnit;
 
 public class PushReceiver extends BroadcastReceiver {
 
+    public enum Actions {
+        cmd, ping, text
+    }
+
+    public enum Commands {
+        help, contact, whois, locate
+    }
+
     @Override
     public void onReceive(Context context, Intent intent)
     {
         SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || sp.getString("reg_id", null) == null || !MainActivity.isConnectedToInternet(context)) {
-            MainActivity.displayNotification(context, "Push rejected", "Forwarding is disabled.");
+            //MainActivity.displayNotification(context, "Push rejected", "Forwarding is disabled.");
             return;
         }
 
-        WakeLocker.acquire(context, 60000);
+        WakeLocker.acquire(context, 10000);
         GoogleCloudMessaging gcm = GoogleCloudMessaging.getInstance(context);
-        boolean async = false;
 
         try {
             String action = intent.getStringExtra("action");
@@ -53,28 +60,38 @@ public class PushReceiver extends BroadcastReceiver {
                 return;
             }
 
-            if (action.contentEquals("text")) {
-                String to = intent.getStringExtra("to");
-                String body = intent.getStringExtra("body");
+            Actions actEn;
+            try { actEn = Actions.valueOf(action); } catch (Exception ex) { actEn = null; }
 
-                MainActivity.displayNotification(context, "Push received", "Sending SMS to " + to + ": \"" + body + "\"");
-            } else if (action.contentEquals("ping")) {
-                pingBack(context, intent, sp);
-                async = true;
-            } else if (action.contentEquals("locate")) {
-                locate(context, intent, sp);
-                async = true;
-            } else {
-                MainActivity.displayNotification(context, "Push failed", "Unsupported action type: " + action);
+            switch (actEn)
+            {
+                case cmd:
+                    handleCmd(context, intent, sp);
+                    break;
+
+                case ping:
+                    MainActivity.sendRequestAsync(context, "pingback", new ArrayList<NameValuePair>(Arrays.asList(
+                        new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
+                        new BasicNameValuePair("time", intent.getStringExtra("time"))
+                    )));
+                    break;
+
+                case text:
+                    String to = intent.getStringExtra("to");
+                    String body = intent.getStringExtra("body");
+
+                    MainActivity.displayNotification(context, "Push received", "Sending SMS to " + to + ": \"" + body + "\"");
+                    break;
+
+                default:
+                    MainActivity.displayNotification(context, "Push failed", "Unsupported action type: " + action);
+                    break;
             }
         } catch (Exception ex) {
             MainActivity.displayNotification(context, "Push failed", ex.toString());
         } finally {
             gcm.close();
-
-            if (!async) {
-                WakeLocker.release();
-            }
+            //WakeLocker.release();
         }
 
         setResultCode(Activity.RESULT_OK);
@@ -110,6 +127,31 @@ public class PushReceiver extends BroadcastReceiver {
         asyncTask.execute();
     }
 
+    private void handleCmd(final Context context, final Intent intent, final SharedPreferences sp)
+    {
+        final String cmd = intent.getStringExtra("cmd");
+        final String arg = intent.getStringExtra("arg");
+        final String from = intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "";
+
+        Commands cmdEn;
+        try { cmdEn = Commands.valueOf(cmd); } catch (Exception ex) { cmdEn = null; }
+
+        switch (cmdEn)
+        {
+            case help:
+                MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n/locate — Replies with the last known network and GPS locations.");
+                break;
+
+            case locate:
+                locate(context, intent, sp);
+                break;
+
+            default:
+                MainActivity.sendMessageAsync(context, sp, "send", from, (from != "" ? "*** " : "") + "The specified command \"%s\" is not supported. Reply \"/help server\" or \"/help device\" for the list of supported commands.");
+                break;
+        }
+    }
+
     private void locate(final Context context, final Intent intent, final SharedPreferences sp)
     {
         AsyncTask<Void, Void, Void> asyncTask = new AsyncTask<Void, Void, Void>() {
@@ -128,16 +170,7 @@ public class PushReceiver extends BroadcastReceiver {
                         body = "Network location provider is not enabled on the device currently.";
                     }
 
-                    try {
-                        JSONObject json = MainActivity.sendRequest("send", new ArrayList<NameValuePair>(Arrays.asList(
-                                new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                                new BasicNameValuePair("body", body)
-                        )));
-                    } catch (ServerError ex) {
-                        MainActivity.displayNotification(context, "Request failed", "Server error: " + ex.toString());
-                    } catch (Exception ex) {
-                        MainActivity.displayNotification(context, "Request failed", "Send error: " + ex.toString());
-                    }
+                    MainActivity.sendMessageAsync(context, sp, "send", body);
                 } catch (Exception ex) { }
 
                 try {
@@ -148,16 +181,7 @@ public class PushReceiver extends BroadcastReceiver {
                         body = "GPS provider is not enabled on the device currently.";
                     }
 
-                    try {
-                        JSONObject json = MainActivity.sendRequest("send", new ArrayList<NameValuePair>(Arrays.asList(
-                                new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                                new BasicNameValuePair("body", body)
-                        )));
-                    } catch (ServerError ex) {
-                        MainActivity.displayNotification(context, "Request failed", "Server error: " + ex.toString());
-                    } catch (Exception ex) {
-                        MainActivity.displayNotification(context, "Request failed", "Send error: " + ex.toString());
-                    }
+                    MainActivity.sendMessageAsync(context, sp, "send", body);
                 } catch (Exception ex) { }
 
                 // TODO: get location updates
