@@ -10,6 +10,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.location.LocationProvider;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.telephony.NeighboringCellInfo;
@@ -108,7 +109,7 @@ public class PushReceiver extends BroadcastReceiver {
         switch (cmdEn)
         {
             case help:
-                MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n/device — Gets device information.\n/locate — Gets the last known network and GPS locations.\n/track [start|stop|status*] — Starts or stops tracking the device with the best provider.");
+                MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n/device — Gets device information.\n/locate — Gets the last known network and GPS locations.\n/track [start|stop|status*|provider|exploit] — Starts or stops tracking the device with the best provider.");
                 break;
 
             case device:
@@ -227,7 +228,7 @@ public class PushReceiver extends BroadcastReceiver {
                 MainActivity.sendMessageAsync(context, sp, "send", "Location tracking is already running with provider " + _lp + ".");
                 return;
             }
-        } else {
+        } else if (!arg.contentEquals("provider") && !arg.contentEquals("exploit")) {
             if (_lm != null && _ll != null) {
                 DecimalFormat df = new DecimalFormat("0.000");
                 MainActivity.sendMessageAsync(context, sp, "send", "Location tracking is running with provider " + _lp + ". " + (_lu == 0 ? "However, no location updates have occurred as of yet." : "Last location update was sent " + df.format((double)(System.currentTimeMillis() - _lu) / 1000.0) + " seconds ago."));
@@ -239,6 +240,51 @@ public class PushReceiver extends BroadcastReceiver {
 
         if (_lm == null) {
             _lm = (LocationManager)context.getSystemService(Context.LOCATION_SERVICE);
+        }
+
+        if (arg.contentEquals("provider")) {
+            try {
+                String provider = getBestProvider();
+                MainActivity.sendMessageAsync(context, sp, "send", "The currently available best location provider is " + provider + ".");
+            } catch (Exception ex) {
+                MainActivity.sendMessageAsync(context, sp, "send", "Error while retrieving best provider: " + ex.getClass().getName() + ": " + ex.getMessage());
+            }
+            return;
+        } else if (arg.contentEquals("exploit")) { // TODO: turn on GPS with root with https://github.com/sms2000/GPSToggler
+            try {
+                if (!_lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    turnGpsOn(context);
+                }
+                MainActivity.sendMessageAsync(context, sp, "send", "Ran exploit, waiting for 5 seconds...");
+                WakeLocker.push(context);
+
+                AsyncTask<Void, Void, Void> asyncTask = new AsyncTask<Void, Void, Void>() {
+
+                    @Override
+                    protected Void doInBackground(Void... params) {
+                        try { Thread.sleep(5000); } catch (Exception ex) { }
+
+                        try {
+                            String provider = getBestProvider();
+                            if (provider != null && provider.contentEquals(LocationManager.GPS_PROVIDER)) {
+                                MainActivity.sendMessageAsync(context, sp, "send", "The GPS provider has been turned on successfully via exploit.");
+                            } else {
+                                MainActivity.sendMessageAsync(context, sp, "send", "Failed to turn on GPS provider via exploit.");
+                            }
+                        } catch (Exception ex) {
+                            MainActivity.sendMessageAsync(context, sp, "send", "Error while re-checking best provider: " + ex.getClass().getName() + ": " + ex.getMessage());
+                        }
+
+                        WakeLocker.pop();
+                        return null;
+                    }
+
+                };
+                asyncTask.execute();
+            } catch (Exception ex) {
+                MainActivity.sendMessageAsync(context, sp, "send", "Error while trying to activate GPS using an exploit: " + ex.getClass().getName() + ": " + ex.getMessage());
+            }
+            return;
         }
 
         if (_ll == null) {
@@ -277,53 +323,11 @@ public class PushReceiver extends BroadcastReceiver {
         }
 
         try {
-            if (!_lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                turnGpsOn(context);
-            }
-            if (!_lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                MainActivity.sendMessageAsync(context, sp, "send", "Tried to turn on GPS provider via an exploit, but failed.");
-            }
-        } catch (Exception ex) {
-            MainActivity.sendMessageAsync(context, sp, "send", "Error while trying to activate GPS using an exploit: " + ex.getClass().getName() + ": " + ex.getMessage());
-        }
-
-        try {
-            final Criteria criteria = new Criteria();
-            criteria.setAccuracy(Criteria.ACCURACY_FINE);
-            criteria.setPowerRequirement(Criteria.POWER_HIGH);
-            criteria.setAltitudeRequired(false);
-            criteria.setBearingRequired(false);
-            criteria.setSpeedRequired(false);
-            criteria.setCostAllowed(true);
-
-            final String bestProvider = _lm.getBestProvider(criteria, true);
-
-            if (bestProvider != null && bestProvider.length() > 0)
-            {
-                _lp = bestProvider;
-                MainActivity.sendMessageAsync(context, sp, "send", "Starting tracking with best available location provider " + bestProvider + "...");
-                _lm.requestLocationUpdates(bestProvider, 500, 0, _ll);
-                WakeLocker.push(context);
-            }
-            else
-            {
-                final List<String> providers = _lm.getProviders(true);
-                boolean found = false;
-
-                for (final String provider : providers)
-                {
-                    found = true;
-                    _lp = provider;
-                    MainActivity.sendMessageAsync(context, sp, "send", "Starting tracking with fallback location provider " + provider + "...");
-                    _lm.requestLocationUpdates(provider, 500, 0, _ll);
-                }
-
-                if (!found) {
-                    MainActivity.sendMessageAsync(context, sp, "send", "No active location provider is available on the device.");
-                } else {
-                    WakeLocker.push(context);
-                }
-            }
+            String provider = getBestProvider();
+            _lp = provider;
+            MainActivity.sendMessageAsync(context, sp, "send", "Starting tracking with best available location provider " + provider + "...");
+            _lm.requestLocationUpdates(provider, 500, 0, _ll);
+            WakeLocker.push(context);
         } catch (Exception ex) {
             try { _lm.removeUpdates(_ll); } catch (Exception ez) { }
             _ll = null;
@@ -332,7 +336,41 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private void turnGpsOn(Context context){
+    private String getBestProvider()
+    {
+        if (_lm == null) {
+            return null;
+        }
+
+        final Criteria criteria = new Criteria();
+        criteria.setAccuracy(Criteria.ACCURACY_FINE);
+        criteria.setPowerRequirement(Criteria.POWER_HIGH);
+        criteria.setAltitudeRequired(false);
+        criteria.setBearingRequired(false);
+        criteria.setSpeedRequired(false);
+        criteria.setCostAllowed(true);
+
+        final String bestProvider = _lm.getBestProvider(criteria, true);
+
+        if (bestProvider != null && bestProvider.length() > 0)
+        {
+            return bestProvider;
+        }
+        else
+        {
+            final List<String> providers = _lm.getProviders(true);
+
+            for (final String provider : providers)
+            {
+                return provider;
+            }
+        }
+
+        return null;
+    }
+
+    private void turnGpsOn(Context context)
+    {
         String provider = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.LOCATION_PROVIDERS_ALLOWED);
 
         if (!provider.contains("gps")) {
@@ -344,7 +382,8 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private void turnGpsOff(Context context){
+    private void turnGpsOff(Context context)
+    {
         String provider = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.LOCATION_PROVIDERS_ALLOWED);
 
         if (provider.contains("gps")) {

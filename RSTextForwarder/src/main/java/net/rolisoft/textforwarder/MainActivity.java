@@ -23,11 +23,15 @@ import android.widget.Toast;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 
 import org.apache.http.HttpResponse;
+import org.apache.http.HttpVersion;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpParams;
+import org.apache.http.params.HttpProtocolParams;
 import org.apache.http.protocol.HTTP;
 import org.apache.http.util.EntityUtils;
 import org.json.JSONObject;
@@ -42,6 +46,9 @@ import java.util.List;
 import java.util.Random;
 
 public class MainActivity extends Activity {
+
+    public static final String AppID = "rstxtfwd";
+    public static final String API = "http://" + AppID + ".appspot.com/";
 
     private Menu _menu;
     private SharedPreferences _sp;
@@ -250,10 +257,18 @@ public class MainActivity extends Activity {
 
     public static JSONObject sendRequest(String path, List<NameValuePair> postData) throws Exception
     {
-        HttpPost post = new HttpPost("http://rstxtfwd.appspot.com/" + path);
-        post.setEntity(new UrlEncodedFormEntity(postData, HTTP.UTF_8));
+        HttpParams httpParams = new BasicHttpParams();
+        HttpProtocolParams.setContentCharset(httpParams, HTTP.UTF_8);
+        HttpProtocolParams.setHttpElementCharset(httpParams, HTTP.UTF_8);
 
-        HttpResponse resp = new DefaultHttpClient().execute(post);
+        DefaultHttpClient client = new DefaultHttpClient(httpParams);
+        client.getParams().setParameter("http.protocol.content-charset", HTTP.UTF_8);
+
+        HttpPost post = new HttpPost(API + path);
+        post.setEntity(new UrlEncodedFormEntity(postData, HTTP.UTF_8));
+        post.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
+
+        HttpResponse resp = client.execute(post);
         JSONObject json = new JSONObject(EntityUtils.toString(resp.getEntity()));
 
         if (!json.getString("res").contentEquals("ok")) {

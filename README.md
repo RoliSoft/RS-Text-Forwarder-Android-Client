@@ -56,7 +56,7 @@ This section contains a list of supported commands.
 
 These commands are handled by the AppEngine application before they may result in a GCM push to the device. A list of these commands is also available in the server-side application's repository as well, this is only kept as reference. For the latest list and behaviour of the commands, please refer to that repository.
 
-### /help [server|device]
+### /help [server*|device]
 
 The server or device replies with the list of commands it supports including some minimal explanation of what they do. The device reply may take up to 2 minutes to complete if your device is in deep sleep. The default parameter is the server's response.
 
@@ -96,7 +96,19 @@ This command only works in the dedicated chat window. Its purpose is to return t
 
 ### /locate
 
-The device will reply with the last known network and GPS location. In the current version, this is just a few lines of code, because it is not the point of the project. Later I will implement proper tracking using `LocationListener`.
+The device will reply with the last known network and GPS locations. These locations may not be accurate at all, because if the device was turned off and moved, then it will return the old location. In these situations look for `/track` for solutions.
+
+### /track [start|stop|status*|provider|exploit]
+
+This command allows you to track your phone's location.
+
+ - **start**: Starts tracking the phone with the best available provider.
+ - **stop**: Stops tracking the phone.
+ - **status**: Gets the status of the `LocationListener`. Returns whether it's running, what provider is in use, and when was the last location update.
+ - **provider**: Gets the name of the currently available best location provider. (Mostly either `gps` or `network`.)
+ - **exploit**: Tries to enable the GPS provider, if disabled, with a method that doesn't require root, but may not work on all devices. Tested on Nexus 4 running Android 4.2.2.
+
+Soon the `exploit` argument will try using root to turn on GPS as a fallback method. See `TODO` in the source.
 
 ## Important
 
@@ -107,7 +119,7 @@ The device will reply with the last known network and GPS location. In the curre
 1. Get Android Studio, however you should be able to compile to app with any Android dev toolkit.
 2. Get Android SDK, unless you have previously installed Android Studio, which already came with a copy.
 3. Import the project to your IDE.
-4. Open the source for `MainActivity` and replace the hard-coded URL in `sendRequest()` to your own server.
+4. Open the source for `MainActivity` and replace the `AppID` constant to point to your own server.
 5. Generate a key which will be used to sign the `apk`.
 6. Compile the project.
 
