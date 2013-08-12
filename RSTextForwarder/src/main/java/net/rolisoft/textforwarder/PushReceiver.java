@@ -32,11 +32,11 @@ import java.util.concurrent.TimeUnit;
 public class PushReceiver extends BroadcastReceiver {
 
     public enum Actions {
-        cmd, ping, text
+        cmd, ping, text, _null
     }
 
     public enum Commands {
-        help, contact, whois, locate
+        help, contact, whois, locate, _null
     }
 
     @Override
@@ -44,11 +44,11 @@ public class PushReceiver extends BroadcastReceiver {
     {
         SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || sp.getString("reg_id", null) == null || !MainActivity.isConnectedToInternet(context)) {
-            //MainActivity.displayNotification(context, "Push rejected", "Forwarding is disabled.");
+            MainActivity.displayNotification(context, "Push rejected", "Forwarding is disabled.");
             return;
         }
 
-        WakeLocker.acquire(context, 10000);
+        WakeLocker.push(context);
         GoogleCloudMessaging gcm = GoogleCloudMessaging.getInstance(context);
 
         try {
@@ -61,7 +61,7 @@ public class PushReceiver extends BroadcastReceiver {
             }
 
             Actions actEn;
-            try { actEn = Actions.valueOf(action); } catch (Exception ex) { actEn = null; }
+            try { actEn = Actions.valueOf(action); } catch (Exception ex) { actEn = Actions._null; }
 
             switch (actEn)
             {
@@ -85,56 +85,28 @@ public class PushReceiver extends BroadcastReceiver {
 
                 default:
                     MainActivity.displayNotification(context, "Push failed", "Unsupported action type: " + action);
+                    String from = intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "";
+                    MainActivity.sendMessageAsync(context, sp, "send", from, (!from.equals("") ? "*** " : "") + "The specified push action \"" + action + "\" is not supported. The server is probably newer than the client on your device.");
                     break;
             }
         } catch (Exception ex) {
-            MainActivity.displayNotification(context, "Push failed", ex.toString());
+            MainActivity.displayNotification(context, "Push failed", ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
             gcm.close();
-            //WakeLocker.release();
+            WakeLocker.pop();
         }
-
-        setResultCode(Activity.RESULT_OK);
-    }
-
-    private void pingBack(final Context context, final Intent intent, final SharedPreferences sp)
-    {
-        AsyncTask<Void, Void, Void> asyncTask = new AsyncTask<Void, Void, Void>() {
-
-            @Override
-            protected Void doInBackground(Void... voids) {
-                try {
-                    JSONObject json = MainActivity.sendRequest("pingback", new ArrayList<NameValuePair>(Arrays.asList(
-                            new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                            new BasicNameValuePair("time", intent.getStringExtra("time"))
-                    )));
-                } catch (ServerError ex) {
-                    MainActivity.displayNotification(context, "Pingback failed", "Server error: " + ex.toString());
-                } catch (Exception ex) {
-                    MainActivity.displayNotification(context, "Pingback failed", "Send error: " + ex.toString());
-                }
-
-                return null;
-            }
-
-            @Override
-            protected void onPostExecute(Void voids) {
-                WakeLocker.release();
-            }
-
-        };
-
-        asyncTask.execute();
     }
 
     private void handleCmd(final Context context, final Intent intent, final SharedPreferences sp)
     {
+        WakeLocker.push(context);
+
         final String cmd = intent.getStringExtra("cmd");
         final String arg = intent.getStringExtra("arg");
         final String from = intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "";
 
         Commands cmdEn;
-        try { cmdEn = Commands.valueOf(cmd); } catch (Exception ex) { cmdEn = null; }
+        try { cmdEn = Commands.valueOf(cmd); } catch (Exception ex) { cmdEn = Commands._null; }
 
         switch (cmdEn)
         {
@@ -147,55 +119,44 @@ public class PushReceiver extends BroadcastReceiver {
                 break;
 
             default:
-                MainActivity.sendMessageAsync(context, sp, "send", from, (from != "" ? "*** " : "") + "The specified command \"%s\" is not supported. Reply \"/help server\" or \"/help device\" for the list of supported commands.");
+                MainActivity.sendMessageAsync(context, sp, "send", from, (!from.equals("") ? "*** " : "") + "The specified command \"" + cmd + "\" is not supported. Reply \"/help server\" or \"/help device\" for the list of supported commands.");
                 break;
         }
+
+        WakeLocker.pop();
     }
 
     private void locate(final Context context, final Intent intent, final SharedPreferences sp)
     {
-        AsyncTask<Void, Void, Void> asyncTask = new AsyncTask<Void, Void, Void>() {
+        String body;
+        Location location;
+        LocationManager locationManager = (LocationManager)context.getSystemService(Context.LOCATION_SERVICE);
 
-            @Override
-            protected Void doInBackground(Void... voids) {
-                String body = null;
-                Location location = null;
-                LocationManager locationManager = (LocationManager)context.getSystemService(Context.LOCATION_SERVICE);
-
-                try {
-                    if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                        location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-                        body = "Last known network location: https://maps.google.com/maps?q=" + location.getLatitude() + "," + location.getLongitude() + " accurate within " + location.getAccuracy() + " meters.";
-                    } else {
-                        body = "Network location provider is not enabled on the device currently.";
-                    }
-
-                    MainActivity.sendMessageAsync(context, sp, "send", body);
-                } catch (Exception ex) { }
-
-                try {
-                    if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                        location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                        body = "Last known GPS location: https://maps.google.com/maps?q=" + location.getLatitude() + "," + location.getLongitude() + " accurate within " + location.getAccuracy() + " meters.";
-                    } else {
-                        body = "GPS provider is not enabled on the device currently.";
-                    }
-
-                    MainActivity.sendMessageAsync(context, sp, "send", body);
-                } catch (Exception ex) { }
-
-                // TODO: get location updates
-                return null;
+        try {
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                body = "Last known network location: https://maps.google.com/maps?q=" + location.getLatitude() + "," + location.getLongitude() + " accurate within " + location.getAccuracy() + " meters.";
+            } else {
+                body = "Network location provider is not enabled on the device currently.";
             }
+        } catch (Exception ex) {
+            body = "Error while retrieving network location: " + ex.getClass().getName() + ": " + ex.getMessage();
+        }
 
-            @Override
-            protected void onPostExecute(Void voids) {
-                WakeLocker.release();
+        MainActivity.sendMessageAsync(context, sp, "send", body);
+
+        try {
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                body = "Last known GPS location: https://maps.google.com/maps?q=" + location.getLatitude() + "," + location.getLongitude() + " accurate within " + location.getAccuracy() + " meters.";
+            } else {
+                body = "GPS provider is not enabled on the device currently.";
             }
+        } catch (Exception ex) {
+            body = "Error while retrieving GPS location: " + ex.getClass().getName() + ": " + ex.getMessage();
+        }
 
-        };
-
-        asyncTask.execute();
+        MainActivity.sendMessageAsync(context, sp, "send", body);
     }
 
 }

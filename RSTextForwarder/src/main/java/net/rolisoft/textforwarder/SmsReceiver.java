@@ -38,7 +38,7 @@ public class SmsReceiver extends BroadcastReceiver {
             return;
         }
 
-        WakeLocker.acquire(context, 60000);
+        WakeLocker.push(context);
 
         try {
             List<TextMessage> messages = getMessagesFrom(context, intent);
@@ -47,9 +47,9 @@ public class SmsReceiver extends BroadcastReceiver {
                 MainActivity.sendMessageAsync(context, sp, "send", msg.from, msg.body);
             }
         } catch (Exception ex) {
-            MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.toString());
+            MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
-            WakeLocker.release();
+            WakeLocker.pop();
         }
     }
 

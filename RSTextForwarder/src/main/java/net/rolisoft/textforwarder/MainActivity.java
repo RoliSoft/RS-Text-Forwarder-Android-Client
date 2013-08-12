@@ -152,9 +152,9 @@ public class MainActivity extends Activity {
                     _sp.edit().putString("reg_id", regId).commit();
                     return "ok";
                 } catch (ServerError ex) {
-                    return "Server-side error occurred:\n" + ex.toString();
+                    return "Server-side error occurred:\n" + ex.getClass().getName() + ": " + ex.getMessage();
                 } catch (Exception ex) {
-                    return "Exception during registration:\n" + ex.toString();
+                    return "Exception during registration:\n" + ex.getClass().getName() + ": " + ex.getMessage();
                 } finally {
                     if (gcm != null) {
                         gcm.close();
@@ -265,14 +265,18 @@ public class MainActivity extends Activity {
 
     private static JSONObject sendRequestNoThrow(Context context, String path, List<NameValuePair> postData)
     {
+        WakeLocker.push(context);
+
         try {
             return MainActivity.sendRequest(path, postData);
         } catch (ServerError ex) {
-            MainActivity.displayNotification(context, "Request to " + path + " failed", "Server error: " + ex.toString());
+            MainActivity.displayNotification(context, "Request to " + path + " failed", "Server error: " + ex.getClass().getName() + ": " + ex.getMessage());
             return ex.response;
         } catch (Exception ex) {
-            MainActivity.displayNotification(context, "Request to " + path + " failed", "Send error: " + ex.toString());
+            MainActivity.displayNotification(context, "Request to " + path + " failed", "Send error: " + ex.getClass().getName() + ": " + ex.getMessage());
             return null;
+        } finally {
+            WakeLocker.pop();
         }
     }
 

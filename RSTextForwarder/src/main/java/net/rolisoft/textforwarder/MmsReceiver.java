@@ -37,7 +37,7 @@ public class MmsReceiver extends BroadcastReceiver {
             return;
         }
 
-        WakeLocker.acquire(context, 60000);
+        WakeLocker.push(context);
 
         try {
             List<TextMessage> messages = getMessagesFrom(context, intent);
@@ -46,9 +46,9 @@ public class MmsReceiver extends BroadcastReceiver {
                 MainActivity.sendMessageAsync(context, sp, "send", msg.from, msg.body);
             }
         } catch (Exception ex) {
-            MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.toString());
+            MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
-            WakeLocker.release();
+            WakeLocker.pop();
         }
     }
 
@@ -71,7 +71,7 @@ public class MmsReceiver extends BroadcastReceiver {
             String buffer = new String(bundle.getByteArray("data"));
 
             for (int i = 0; i < 10; i++) {
-                try { Thread.sleep(2000); } catch (Exception ex) { }
+                try { Thread.sleep(1000); } catch (Exception ex) { }
 
                 Cursor cur = context.getContentResolver().query(Uri.parse("content://mms/inbox"), null, "m_type in (132,128)", null, "date DESC");
                 if (cur == null) {
