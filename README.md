@@ -76,7 +76,7 @@ Opens a new chat window dedicated to *name*. Anything sent to that window will b
 
 The way this works, is that instead of talking to `rstxtfwd.appspot.com` the application will clean the *name* parameter and send you a message from `name@rstxtfwd.appspotchat.com`.
 
-The *name* can be a phone number or either full or partial name. The action will be carried out on the first match. If a contact has multiple phone numbers, you can append `/N` to the name where `N` is the index of the phone number as seen in your address book, starting from 0.
+The *name* can be a phone number or either full or partial name. The action will be carried out on the first match. If a contact has multiple phone numbers, you can append `/N` to the name where `N` is the index of the phone number as seen in your address book, starting from 1. If you do not append an index, but have a number marked as default, then that will be used. If not, the first mobile number will be used.
 
 To make sure your first match is the actual number you're looking for, you can play around with `/contact`.
 
