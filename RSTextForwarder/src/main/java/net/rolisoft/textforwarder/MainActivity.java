@@ -14,6 +14,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.app.Activity;
 import android.support.v4.app.NotificationCompat;
+import android.util.Log;
 import android.util.Patterns;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -37,8 +38,10 @@ import org.apache.http.util.EntityUtils;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.RandomAccessFile;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,6 +52,9 @@ public class MainActivity extends Activity {
 
     public static final String AppID = "rstxtfwd";
     public static final String API = "http://" + AppID + ".appspot.com/";
+
+    private final String TAG = this.toString();
+    private static final String STAG = MainActivity.class.getName();
 
     private Menu _menu;
     private SharedPreferences _sp;
@@ -130,11 +136,14 @@ public class MainActivity extends Activity {
 
             @Override
             protected String doInBackground(Void... voids) {
+                Log.i(TAG, "Starting to register from GCM...");
+
                 GoogleCloudMessaging gcm = null;
 
                 try {
                     String email = findUserEmail(MainActivity.this);
                     if (email == null) {
+                        Log.e(TAG, "Couldn't find the primary Google account's email address.");
                         return "Couldn't find the primary Google account's email address.";
                     }
 
@@ -159,8 +168,10 @@ public class MainActivity extends Activity {
                     _sp.edit().putString("reg_id", regId).commit();
                     return "ok";
                 } catch (ServerError ex) {
+                    Log.e(TAG, "Server-side error occurred while register for GCM.", ex);
                     return "Server-side error occurred:\n" + ex.getClass().getName() + ": " + ex.getMessage();
                 } catch (Exception ex) {
+                    Log.e(TAG, "Error occurred while register for GCM.", ex);
                     return "Exception during registration:\n" + ex.getClass().getName() + ": " + ex.getMessage();
                 } finally {
                     if (gcm != null) {
@@ -185,17 +196,53 @@ public class MainActivity extends Activity {
         asyncTask.execute();
     }
 
-    private static String readStream(InputStream is)
+    public static String readFile(String path) throws IOException
+    {
+        RandomAccessFile raf = null;
+
+        try {
+            raf = new RandomAccessFile(path, "r");
+            StringBuilder sb = new StringBuilder();
+            String ln = "";
+
+            while ((ln = raf.readLine()) != null) {
+                sb.append(ln + "\n");
+            }
+
+            return sb.toString();
+        } finally {
+            if (raf != null) {
+                raf.close();
+            }
+        }
+    }
+
+    public static String runAndRead(String command) throws IOException
+    {
+        InputStream is = null;
+
+        try {
+            //ProcessBuilder cmd = new ProcessBuilder(command);
+            Process process = Runtime.getRuntime().exec(command);
+            is = process.getInputStream();
+
+            return readStream(is);
+        } finally {
+            if (is != null) {
+                is.close();
+            }
+        }
+    }
+
+    public static String readStream(InputStream is) throws IOException
     {
         StringBuilder sb = new StringBuilder();
         BufferedReader rd = new BufferedReader(new InputStreamReader(is));
         String ln = "";
 
-        try {
-            while ((ln = rd.readLine()) != null) {
-                sb.append(ln);
-            }
-        } catch (Exception ex) { }
+        while ((ln = rd.readLine()) != null) {
+            sb.append(ln + "\n");
+        }
 
         return sb.toString();
     }
@@ -221,11 +268,13 @@ public class MainActivity extends Activity {
         ConnectivityManager connectivity = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         if (connectivity == null) {
+            Log.w(STAG, "Couldn't open ConnectivityManager. Assuming no internet connection...!");
             return false;
         }
 
         NetworkInfo[] info = connectivity.getAllNetworkInfo();
         if (info == null){
+            Log.w(STAG, "No network interfaces found. Assuming no internet connection...");
             return false;
         }
 
@@ -282,21 +331,30 @@ public class MainActivity extends Activity {
     {
         WakeLocker.push(context);
 
+        Log.i(STAG, "Sending message of type '" + path + "' to API...");
+
+        long st = System.currentTimeMillis();
+
         try {
             return MainActivity.sendRequest(path, postData);
         } catch (ServerError ex) {
+            Log.e(STAG, "Server-side error occurred while contacting API.", ex);
             MainActivity.displayNotification(context, "Request to " + path + " failed", "Server error: " + ex.getClass().getName() + ": " + ex.getMessage());
             return ex.response;
         } catch (Exception ex) {
+            Log.e(STAG, "Error occurred while contacting API.", ex);
             MainActivity.displayNotification(context, "Request to " + path + " failed", "Send error: " + ex.getClass().getName() + ": " + ex.getMessage());
             return null;
         } finally {
+            Log.i(STAG, "Request took " + (System.currentTimeMillis() - st) + "ms.");
             WakeLocker.pop();
         }
     }
 
     public static AsyncTask<Void, Void, JSONObject> sendRequestAsync(final Context context, final String path, final List<NameValuePair> postData)
     {
+        WakeLocker.push(context);
+
         AsyncTask<Void, Void, JSONObject> asyncTask = new AsyncTask<Void, Void, JSONObject>() {
 
             @Override
@@ -305,7 +363,14 @@ public class MainActivity extends Activity {
                 return sendRequestNoThrow(context, path, postData);
             }
 
+            @Override
+            protected void onPostExecute(JSONObject result)
+            {
+                WakeLocker.pop();
+            }
+
         };
+
         asyncTask.execute();
         return asyncTask;
     }

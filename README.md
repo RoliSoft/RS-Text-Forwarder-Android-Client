@@ -94,6 +94,38 @@ The purpose of this command is to make sure you're addressing the right contact 
 
 This command only works in the dedicated chat window. Its purpose is to return the full name and phone number of the receiving end of the forwarded messages.
 
+### /device [info*|cpu]
+
+Returns some miscellaneous device information, such as IMEI, cell towers, etc. When `cpu` is specified, returns the current clock speed and the min/max for the selected CPU governor.
+
+### /cmd *cmd*
+
+Runs a command on the device and returns its content. This is very primitive as of now, and if the launched process wants input, the `Intent` will lock up and Android will show a force close dialog after a while. Until you don't force close it, further messages will not be processed.
+
+    [06:17] RoliSoft: /cmd cat /proc/cpuinfo
+    [06:17] rstxtfwd@appspot.com: Pushing command cmd to device...
+    [06:17] rstxtfwd@appspot.com: Processor: ARMv7 Processor rev 2 (v7l) [...]
+
+To run a command under root, use `su -c`:
+
+    [06:21] RoliSoft: /cmd su -c df
+    [06:21] rstxtfwd@appspot.com: Pushing command cmd to device...
+    [06:21] rstxtfwd@appspot.com: Filesystem               Size     Used     Free   Blksize [...]
+
+You will have to allow superuser rights on the device the first time you try to use `su` within the app.
+
+### /apps [list [all|sys|user*]|run *app*|running*|ps]
+
+This command allows you to list running and installed apps, and start them.
+
+ - **list**: Lists the installed packages.
+  - **all**: Lists all packages.
+  - **sys**: Lists only system packages.
+  - **user**: Lists only user-installed apps.
+ - **run** *app*: Runs the specified app. The *app* argument is tested against displayed app names, and the first partially or fully matching package gets launched.
+ - **running**: Lists running applications using `ActivityManager`.
+ - **ps**: Lists running applications using `ps`. This is essentially `/cmd ps`, but that command was not yet implemented at that point.
+
 ### /locate
 
 The device will reply with the last known network and GPS locations. These locations may not be accurate at all, because if the device was turned off and moved, then it will return the old location. In these situations look for `/track` for solutions.

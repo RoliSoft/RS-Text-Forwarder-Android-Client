@@ -1,9 +1,14 @@
 package net.rolisoft.textforwarder;
 
+import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.location.Criteria;
 import android.location.Location;
@@ -18,37 +23,44 @@ import android.provider.Settings;
 import android.telephony.NeighboringCellInfo;
 import android.telephony.TelephonyManager;
 import android.telephony.gsm.GsmCellLocation;
+import android.util.Log;
 
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.message.BasicNameValuePair;
 
+import java.io.InputStream;
 import java.text.DecimalFormat;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 public class PushReceiver extends BroadcastReceiver {
 
+    private final String TAG = this.toString();
+
     public enum Actions {
         cmd, ping, text, chat, _null
     }
 
     public enum Commands {
-        help, contact, whois, locate, device, track, _null
+        help, contact, whois, locate, device, track, apps, cmd, _null
     }
 
     @Override
     public void onReceive(Context context, Intent intent)
     {
+        Log.i(TAG, "Received push notification...");
+
         SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || sp.getString("reg_id", null) == null || !MainActivity.isConnectedToInternet(context)) {
-            MainActivity.displayNotification(context, "Push rejected", "Forwarding is disabled.");
+            Log.w(TAG, "Push rejected because forwarding is disabled or GCM ID is unknown.");
             return;
         }
 
-        WakeLocker.push(context);
+        WakeLocker.pushd(context);
         GoogleCloudMessaging gcm = GoogleCloudMessaging.getInstance(context);
 
         try {
@@ -56,9 +68,12 @@ public class PushReceiver extends BroadcastReceiver {
             String msgType = gcm.getMessageType(intent);
 
             if (!msgType.contentEquals("gcm")) {
+                Log.w(TAG, "Push rejected because message type '" + msgType + "' is not supported.");
                 MainActivity.displayNotification(context, "Push failed", "Received message type: " + msgType);
                 return;
             }
+
+            Log.i(TAG, "Push message requests action '" + action + "'.");
 
             Actions actEn;
             try { actEn = Actions.valueOf(action); } catch (Exception ex) { actEn = Actions._null; }
@@ -72,7 +87,8 @@ public class PushReceiver extends BroadcastReceiver {
                 case ping:
                     MainActivity.sendRequestAsync(context, "pingback", new ArrayList<NameValuePair>(Arrays.asList(
                         new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                        new BasicNameValuePair("time", intent.getStringExtra("time"))
+                        new BasicNameValuePair("time", intent.getStringExtra("time")),
+                        new BasicNameValuePair("from", intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "")
                     )));
                     break;
 
@@ -94,11 +110,14 @@ public class PushReceiver extends BroadcastReceiver {
                     break;
             }
         } catch (Exception ex) {
+            Log.e(TAG, "Error while processing push notification.", ex);
             MainActivity.displayNotification(context, "Push failed", ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
             gcm.close();
-            WakeLocker.pop();
+            WakeLocker.popd();
         }
+
+        setResultCode(Activity.RESULT_OK);
     }
 
     private void handleCmd(final Context context, final Intent intent, final SharedPreferences sp)
@@ -109,17 +128,26 @@ public class PushReceiver extends BroadcastReceiver {
         final String arg = intent.getStringExtra("arg");
         final String from = intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "";
 
+        Log.i(TAG, "Command handler called with command '" + cmd + "'.");
+
         Commands cmdEn;
         try { cmdEn = Commands.valueOf(cmd); } catch (Exception ex) { cmdEn = Commands._null; }
 
         switch (cmdEn)
         {
             case help:
-                MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n/device — Gets device information.\n/locate — Gets the last known network and GPS locations.\n/track [start|stop|status*|provider|exploit] — Starts or stops tracking the device with the best provider.");
+                MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n" +
+                        "/contact *name*[/*index*] — Search through your address book.\n" +
+                        "/whois — When in dedicated window, reveals the destination contact." +
+                        "/device [info*|cpu] — Gets device information or current/min/max CPU speed.\n" +
+                        "/apps [list [all|sys|user*]|run *app*|running*|ps] — Lists the currently installed/running applications or starts one if specified." +
+                        "/cmd *cmd* — Runs a command on your device." +
+                        "/locate — Gets the last known network and GPS locations.\n" +
+                        "/track [start|stop|status*|provider|exploit] — Starts or stops tracking the device with the best provider.");
                 break;
 
             case device:
-                device(context, intent, sp);
+                device(context, intent, sp, arg);
                 break;
 
             case locate:
@@ -134,8 +162,29 @@ public class PushReceiver extends BroadcastReceiver {
                 contact(context, intent, sp, arg);
                 break;
 
+            case apps:
+                apps(context, intent, sp, arg);
+                break;
+
+            case cmd:
+                cmd(context, intent, sp, arg);
+                break;
+
+            case whois:
+                if (!from.contentEquals("")) {
+                    Tuple<String, String> contact = resolveXmppAddr(context, from);
+                    if (contact != null) {
+                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** All messages sent to this address will be forwarded to " + contact.x + " (" + contact.y + ")");
+                    } else {
+                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** Messages sent to this address will be discarded, because the contact name or phone number could not be resolved.");
+                    }
+                } else {
+                    MainActivity.sendMessageAsync(context, sp, "send", from, "The specified command is not valid in this context.");
+                }
+                break;
+
             default:
-                MainActivity.sendMessageAsync(context, sp, "send", from, (!from.equals("") ? "*** " : "") + "The specified command \"" + cmd + "\" is not supported. Reply \"/help server\" or \"/help device\" for the list of supported commands.");
+                MainActivity.sendMessageAsync(context, sp, "send", from, (!from.contentEquals("") ? "*** " : "") + "The specified command \"" + cmd + "\" is not supported. Reply \"/help server\" or \"/help device\" for the list of supported commands.");
                 break;
         }
 
@@ -157,7 +206,7 @@ public class PushReceiver extends BroadcastReceiver {
             }
         }
 
-        Tuple<String, String> contact;
+        Tuple<String, String> contact, ctry;
 
         try {
             INameCompare cmp = new INameCompare() {
@@ -165,11 +214,11 @@ public class PushReceiver extends BroadcastReceiver {
                 @Override
                 public boolean compare(String a, String b)
                 {
-                    return a.toLowerCase().contains(b);
+                    return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().contains(b);
                 }
 
             };
-            contact = resolveName(context, cmp, needle, sel);
+            contact = resolveName(context, cmp, Normalizer.normalize(needle, Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase(), sel);
         } catch (Exception ex) {
             MainActivity.sendMessageAsync(context, sp, "send", "Error while reading contacts: " + ex.getClass().getName() + ": " + ex.getMessage());
             return;
@@ -180,40 +229,128 @@ public class PushReceiver extends BroadcastReceiver {
             return;
         }
 
-        MainActivity.sendMessageAsync(context, sp, "send", contact.y.replaceAll("[^0-9]", ""), "All messages sent to this address will be forwarded to " + contact.x + " (" + contact.y + ")");
+        String sname = Normalizer.normalize(contact.x.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().replaceAll("([\"']|^([^a-z]+)|([^a-z]+)$)", "").replaceAll("[^a-z0-9]", ".").replaceAll("\\.{2,}", ".");
+
+        if (sel != -1) {
+            sname += "-" + sel;
+        }
+
+        ctry = resolveXmppAddr(context, sname);
+        if (!ctry.y.contentEquals(contact.y)) {
+            sname = contact.y.replaceAll("[^0-9]", "");
+        }
+
+        MainActivity.sendMessageAsync(context, sp, "send", sname, "*** All messages sent to this address will be forwarded to " + contact.x + " (" + contact.y + ")");
     }
 
-    private void device(final Context context, final Intent intent, final SharedPreferences sp)
+    private Tuple<String, String> resolveXmppAddr(Context context, String addr)
+    {
+        String needle = addr;
+        int sel = -1;
+        if (needle.contains("-")) {
+            String[] mc = needle.split("/(?!.*\\-)", 2);
+            if (mc.length > 1) {
+                try {
+                    sel = Integer.parseInt(mc[1].trim());
+                    needle = mc[0].trim();
+                } catch (Exception ex) { }
+            }
+        }
+
+        INameCompare cmp = new INameCompare() {
+
+            @Override
+            public boolean compare(String a, String b)
+            {
+                return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().replaceAll("([\"']|^([^a-z]+)|([^a-z]+)$)", "").replaceAll("[^a-z0-9]", ".").replaceAll("\\.{2,}", ".").contains(b);
+            }
+
+        };
+
+        return resolveName(context, cmp, Normalizer.normalize(addr, Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase(), sel);
+    }
+
+    private void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         StringBuilder sb = new StringBuilder();
-        TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
-        GsmCellLocation loc = (GsmCellLocation)tm.getCellLocation();
 
-        sb.append("Device info:\n");
-        sb.append("Cell ID: " + loc.getCid() + "\n");
-        sb.append("LAC: " + loc.getLac() + "\n");
-        sb.append("Device ID: " + tm.getDeviceId() + "\n");
-        sb.append("Phone Number: " + tm.getLine1Number() + "\n");
-        sb.append("Software Version: " + tm.getDeviceSoftwareVersion() + "\n");
-        sb.append("Network Operator: " + tm.getNetworkOperatorName() + "\n");
-        sb.append("Network Country Code: " + tm.getNetworkCountryIso() + "\n");
-        sb.append("Network Code: " + tm.getNetworkOperator() + "\n");
-        sb.append("SIM Operator Name: " + tm.getSimOperatorName() + "\n");
-        sb.append("SIM Op. Country Code: " + tm.getSimCountryIso() + "\n");
-        sb.append("SIM Operator Code: " + tm.getSimOperator() + "\n");
-        sb.append("SIM Serial No.: " + tm.getSimSerialNumber() + "\n");
-        sb.append("Subscriber ID: " + tm.getSubscriberId() + "\n");
-        sb.append("Network Type: " + getNetworkTypeString(tm.getNetworkType()) + "\n");
-        sb.append("Phone Type: " + getPhoneTypeString(tm.getPhoneType()) + "\n");
+        if (arg.contentEquals("cpu")) {
+            int cur, min, max;
+            DecimalFormat dfg = new DecimalFormat("0.00 GHz");
+            DecimalFormat dfm = new DecimalFormat("0 MHz");
 
-        List<NeighboringCellInfo> cellinfo = tm.getNeighboringCellInfo();
+            sb.append("Current CPU speed: ");
 
-        if (null != cellinfo) {
-            sb.append("Neighboring Cells:\n");
-
-            for (NeighboringCellInfo info : cellinfo) {
-                sb.append("CellID: " + info.getCid() + ", RSSI: " + info.getRssi() + "\n");
+            try {
+                cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")) / 1000;
+                if (cur >= 1000) {
+                    sb.append(dfg.format((float)cur / 1000.0));
+                } else {
+                    sb.append(dfm.format(cur));
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Error while reading CPU speed.", ex);
             }
+
+            sb.append(" [");
+
+            try {
+                min = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq")) / 1000;
+                if (min >= 1000) {
+                    sb.append(dfg.format((float)min / 1000.0));
+                } else {
+                    sb.append(dfm.format(min));
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Error while reading CPU speed.", ex);
+            }
+
+            sb.append(", ");
+
+            try {
+                max = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")) / 1000;
+                if (max >= 1000) {
+                    sb.append(dfg.format((float)max / 1000.0));
+                } else {
+                    sb.append(dfm.format(max));
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Error while reading CPU speed.", ex);
+            }
+
+            sb.append("]");
+        } else if (arg.length() == 0 || arg.contentEquals("info")) {
+            TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+            GsmCellLocation loc = (GsmCellLocation)tm.getCellLocation();
+
+            sb.append("Device info:\n");
+            sb.append("Cell ID: " + loc.getCid() + "\n");
+            sb.append("LAC: " + loc.getLac() + "\n");
+            sb.append("Device ID: " + tm.getDeviceId() + "\n");
+            sb.append("Phone Number: " + tm.getLine1Number() + "\n");
+            sb.append("Software Version: " + tm.getDeviceSoftwareVersion() + "\n");
+            sb.append("Network Operator: " + tm.getNetworkOperatorName() + "\n");
+            sb.append("Network Country Code: " + tm.getNetworkCountryIso() + "\n");
+            sb.append("Network Code: " + tm.getNetworkOperator() + "\n");
+            sb.append("SIM Operator Name: " + tm.getSimOperatorName() + "\n");
+            sb.append("SIM Op. Country Code: " + tm.getSimCountryIso() + "\n");
+            sb.append("SIM Operator Code: " + tm.getSimOperator() + "\n");
+            sb.append("SIM Serial No.: " + tm.getSimSerialNumber() + "\n");
+            sb.append("Subscriber ID: " + tm.getSubscriberId() + "\n");
+            sb.append("Network Type: " + getNetworkTypeString(tm.getNetworkType()) + "\n");
+            sb.append("Phone Type: " + getPhoneTypeString(tm.getPhoneType()) + "\n");
+
+            List<NeighboringCellInfo> cellinfo = tm.getNeighboringCellInfo();
+
+            if (null != cellinfo) {
+                sb.append("Neighboring Cells:\n");
+
+                for (NeighboringCellInfo info : cellinfo) {
+                    sb.append(" - CellID: " + info.getCid() + ", RSSI: " + info.getRssi() + ", Type: " + getNetworkTypeString(info.getNetworkType()) + "\n");
+                }
+            }
+        } else {
+            sb.append("The specified subcommand is not valid for /device.");
         }
 
         MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
@@ -262,6 +399,11 @@ public class PushReceiver extends BroadcastReceiver {
 
     private void track(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
+        if (arg.length() > 0 && !arg.contentEquals("start") && !arg.contentEquals("stop") && !arg.contentEquals("provider") && !arg.contentEquals("exploit") && !arg.contentEquals("status")) {
+            MainActivity.sendMessageAsync(context, sp, "send", "The specified subcommand is not valid for /track.");
+            return;
+        }
+
         if (arg.contentEquals("stop")) {
             if (_lm != null && _ll != null) {
                 try { _lm.removeUpdates(_ll); } catch (Exception ex) { }
@@ -420,6 +562,114 @@ public class PushReceiver extends BroadcastReceiver {
         return null;
     }
 
+    private void apps(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    {
+        StringBuilder sb = new StringBuilder();
+
+        if (arg.length() == 0 || arg.contentEquals("running")) {
+            ActivityManager actvityManager = (ActivityManager)context.getSystemService(Activity.ACTIVITY_SERVICE);
+            List<ActivityManager.RunningAppProcessInfo> procInfos = actvityManager.getRunningAppProcesses();
+
+            sb.append("List of running applications:\n");
+
+            for (ActivityManager.RunningAppProcessInfo app : procInfos) {
+                sb.append(" - " + app.pid + "# ");
+
+                if (app.pkgList.length > 0) {
+                    if (app.pkgList[0].contentEquals(app.processName)) {
+                        sb.append(app.processName);
+                    } else {
+                        sb.append(app.pkgList[0] + " / " + app.processName);
+                    }
+                } else {
+                    sb.append(app.processName);
+                }
+
+                if (app.importanceReasonComponent != null) {
+                    String cls = app.importanceReasonComponent.getClassName();
+                    if (cls != null && !cls.contentEquals(app.processName)) {
+                        sb.append(" / " + cls);
+                    }
+                }
+
+                sb.append("\n");
+            }
+        } else if (arg.contentEquals("ps")) {
+            try {
+                sb.append(MainActivity.runAndRead("/system/bin/ps"));
+            } catch (Exception ex) {
+                sb.append("Error while running '/system/bin/ps': " + ex.getClass().getName() + ": " + ex.getMessage());
+            }
+        } else if (arg.contentEquals("list") || arg.contentEquals("list all") || arg.contentEquals("list user") || arg.contentEquals("list sys")) {
+            PackageManager packageManager = context.getPackageManager();
+            List<PackageInfo> apps = packageManager.getInstalledPackages(0);
+
+            sb.append("List of installed applications:\n");
+
+            boolean all = arg.contentEquals("list all");
+            boolean sys = all || arg.contentEquals("list sys");
+            boolean usr = all || arg.contentEquals("list user") || arg.contentEquals("list");
+            for (PackageInfo pkg : apps) {
+                if ((pkg.applicationInfo.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0) {
+                    if (!sys) {
+                        continue;
+                    }
+                } else {
+                    if (!usr) {
+                        continue;
+                    }
+                }
+
+                sb.append(" - " + pkg.applicationInfo.loadLabel(packageManager) + " " + pkg.versionName + " [" + pkg.packageName + " " + pkg.versionCode + "]" + "\n");
+            }
+        } else if (arg.startsWith("run ")) {
+            String query = arg.split(" ", 2)[1].toLowerCase();
+
+            PackageManager packageManager = context.getPackageManager();
+            List<PackageInfo> apps = packageManager.getInstalledPackages(0);
+
+            String ps = null, pn = null;
+
+            for (PackageInfo pkg : apps) {
+                ps = pkg.applicationInfo.loadLabel(packageManager).toString();
+                if (ps.toLowerCase().contains(query)) {
+                    pn = pkg.packageName;
+                    break;
+                }
+            }
+
+            if (pn == null) {
+                sb.append("No package names found matching " + query + ".");
+            } else {
+                sb.append("Launching " + ps + " (" + pn + ") on your device...");
+
+                Intent it = packageManager.getLaunchIntentForPackage(pn);
+                context.startActivity(it);
+            }
+        } else {
+            sb.append("The specified subcommand is not valid for /apps.");
+        }
+
+        MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
+    }
+
+    private void cmd(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    {
+        StringBuilder sb = new StringBuilder();
+
+        if (arg.length() == 0) {
+            sb.append("No command specified to run.");
+        } else {
+            try {
+                sb.append(MainActivity.runAndRead(arg));
+            } catch (Exception ex) {
+                sb.append("Error while running '" + arg + "': " + ex.getClass().getName() + ": " + ex.getMessage());
+            }
+        }
+
+        MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
+    }
+
     private void contact(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         StringBuilder sb = new StringBuilder();
@@ -441,6 +691,8 @@ public class PushReceiver extends BroadcastReceiver {
             }
         }
 
+        needle = Normalizer.normalize(needle, Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase();
+
         List<Contact> contacts;
 
         try {
@@ -455,7 +707,7 @@ public class PushReceiver extends BroadcastReceiver {
         int j = 0;
         for (Contact contact : contacts) {
             int idx;
-            if ((idx = contact.name.toLowerCase().indexOf(needle)) != -1) {
+            if ((idx = Normalizer.normalize(contact.name.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().indexOf(needle)) != -1) {
                 j++;
 
                 sb.append(j + ". " + contact.name.substring(0, idx) + "[" + contact.name.substring(idx, idx + needle.length()) + "]" + contact.name.substring(idx + needle.length()) + "\n");
@@ -528,7 +780,7 @@ public class PushReceiver extends BroadcastReceiver {
             @Override
             public boolean compare(String a, String b)
             {
-                return a.toLowerCase().contains(b);
+                return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().contains(b);
             }
 
         };

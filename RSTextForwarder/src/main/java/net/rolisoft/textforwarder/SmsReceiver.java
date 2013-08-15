@@ -1,44 +1,35 @@
 package net.rolisoft.textforwarder;
 
+import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.StrictMode;
 import android.telephony.SmsMessage;
-import android.widget.Toast;
-
-import com.google.android.gms.gcm.GoogleCloudMessaging;
-
-import org.apache.http.HttpResponse;
-import org.apache.http.NameValuePair;
-import org.apache.http.client.entity.UrlEncodedFormEntity;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.message.BasicNameValuePair;
-import org.apache.http.protocol.HTTP;
-import org.apache.http.util.EntityUtils;
-import org.json.JSONObject;
+import android.util.Log;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class SmsReceiver extends BroadcastReceiver {
 
+    private final String TAG = this.toString();
+
     @Override
     public void onReceive(final Context context, Intent intent)
     {
+        Log.i(TAG, "Received SMS broadcast...");
+
         final SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || !sp.getBoolean("forward_sms", true) || !MainActivity.isConnectedToInternet(context)) {
+            Log.w(TAG, "Forwarding disabled or no internet connection.");
             return;
         }
 
-        WakeLocker.push(context);
+        WakeLocker.pushd(context);
 
         try {
             List<TextMessage> messages = getMessagesFrom(context, intent);
@@ -47,10 +38,13 @@ public class SmsReceiver extends BroadcastReceiver {
                 MainActivity.sendMessageAsync(context, sp, "send", msg.from, msg.body);
             }
         } catch (Exception ex) {
+            Log.e(TAG, "Error while extracting messages from intent.", ex);
             MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
-            WakeLocker.pop();
+            WakeLocker.popd();
         }
+
+        setResultCode(Activity.RESULT_OK);
     }
 
     public static List<TextMessage> getMessagesFrom(Context context, Intent intent)
