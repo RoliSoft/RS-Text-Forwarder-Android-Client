@@ -8,6 +8,7 @@ public class Contact {
     public String id;
     public String name;
     public Number preferred;
+    public Number selected;
     public List<Number> numbers;
 
     public Contact(String id, String name)

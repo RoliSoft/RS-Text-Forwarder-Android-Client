@@ -14,6 +14,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -121,7 +122,19 @@ public class MmsReceiver extends BroadcastReceiver {
                             }
                         }
 
-                        messages.add(new TextMessage(from, date, subj + (body.length() != 0 ? "\n" + body : "")));
+                        String sender;
+                        Contact contact = ContactTools.findContact(context, from, true);
+                        if (contact != null) {
+                            sender = ContactTools.createXmppAddrAutoSelCheck(context, contact);
+                        } else {
+                            if (ContactTools.isPhoneNumber(from)) {
+                                sender = ContactTools.cleanNumber(from);
+                            } else {
+                                sender = ContactTools.createSlug(from);
+                            }
+                        }
+
+                        messages.add(new TextMessage(sender, date, subj + (body.length() != 0 ? "\n" + body : "")));
                         return messages;
                     } while (cur.moveToNext() && ++cnt < 10);
                 } finally {

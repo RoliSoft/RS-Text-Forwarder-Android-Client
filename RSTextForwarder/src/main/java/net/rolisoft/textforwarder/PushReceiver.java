@@ -16,11 +16,23 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.location.LocationProvider;
 import android.net.Uri;
+import android.net.wifi.ScanResult;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.provider.Settings;
+import android.telephony.CellInfo;
+import android.telephony.CellInfoCdma;
+import android.telephony.CellInfoGsm;
+import android.telephony.CellInfoLte;
+import android.telephony.CellSignalStrengthCdma;
+import android.telephony.CellSignalStrengthGsm;
+import android.telephony.CellSignalStrengthLte;
 import android.telephony.NeighboringCellInfo;
+import android.telephony.PhoneStateListener;
+import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.telephony.gsm.GsmCellLocation;
 import android.util.Log;
@@ -172,9 +184,9 @@ public class PushReceiver extends BroadcastReceiver {
 
             case whois:
                 if (!from.contentEquals("")) {
-                    Tuple<String, String> contact = resolveXmppAddr(context, from);
+                    Contact contact = ContactTools.resolveXmppAddr(context, from);
                     if (contact != null) {
-                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** All messages sent to this address will be forwarded to " + contact.x + " (" + contact.y + ")");
+                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** All messages sent to this address will be forwarded to " + contact.name + " (" + contact.selected.number + ")");
                     } else {
                         MainActivity.sendMessageAsync(context, sp, "send", from, "*** Messages sent to this address will be discarded, because the contact name or phone number could not be resolved.");
                     }
@@ -194,7 +206,7 @@ public class PushReceiver extends BroadcastReceiver {
     private void chat(final Context context, final Intent intent, final SharedPreferences sp)
     {
         String with = intent.getStringExtra("with");
-        String needle = with.toLowerCase().trim();
+        String needle = with.trim();
         int sel = -1;
         if (needle.contains("/")) {
             String[] mc = needle.split("/(?!.*/)", 2);
@@ -206,19 +218,10 @@ public class PushReceiver extends BroadcastReceiver {
             }
         }
 
-        Tuple<String, String> contact, ctry;
+        Contact contact;
 
         try {
-            INameCompare cmp = new INameCompare() {
-
-                @Override
-                public boolean compare(String a, String b)
-                {
-                    return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().contains(b);
-                }
-
-            };
-            contact = resolveName(context, cmp, Normalizer.normalize(needle, Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase(), sel);
+            contact = ContactTools.findContact(context, needle, sel, false);
         } catch (Exception ex) {
             MainActivity.sendMessageAsync(context, sp, "send", "Error while reading contacts: " + ex.getClass().getName() + ": " + ex.getMessage());
             return;
@@ -229,45 +232,7 @@ public class PushReceiver extends BroadcastReceiver {
             return;
         }
 
-        String sname = Normalizer.normalize(contact.x.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().replaceAll("([\"']|^([^a-z]+)|([^a-z]+)$)", "").replaceAll("[^a-z0-9]", ".").replaceAll("\\.{2,}", ".");
-
-        if (sel != -1) {
-            sname += "-" + sel;
-        }
-
-        ctry = resolveXmppAddr(context, sname);
-        if (!ctry.y.contentEquals(contact.y)) {
-            sname = contact.y.replaceAll("[^0-9]", "");
-        }
-
-        MainActivity.sendMessageAsync(context, sp, "send", sname, "*** All messages sent to this address will be forwarded to " + contact.x + " (" + contact.y + ")");
-    }
-
-    private Tuple<String, String> resolveXmppAddr(Context context, String addr)
-    {
-        String needle = addr;
-        int sel = -1;
-        if (needle.contains("-")) {
-            String[] mc = needle.split("/(?!.*\\-)", 2);
-            if (mc.length > 1) {
-                try {
-                    sel = Integer.parseInt(mc[1].trim());
-                    needle = mc[0].trim();
-                } catch (Exception ex) { }
-            }
-        }
-
-        INameCompare cmp = new INameCompare() {
-
-            @Override
-            public boolean compare(String a, String b)
-            {
-                return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().replaceAll("([\"']|^([^a-z]+)|([^a-z]+)$)", "").replaceAll("[^a-z0-9]", ".").replaceAll("\\.{2,}", ".").contains(b);
-            }
-
-        };
-
-        return resolveName(context, cmp, Normalizer.normalize(addr, Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase(), sel);
+        MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " (" + contact.selected.number + ")");
     }
 
     private void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
@@ -323,31 +288,55 @@ public class PushReceiver extends BroadcastReceiver {
             TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
             GsmCellLocation loc = (GsmCellLocation)tm.getCellLocation();
 
+            // RSSI is -1 for now, until tm.getAllCellInfo() stops returning null and start working as documented.
+
             sb.append("Device info:\n");
-            sb.append("Cell ID: " + loc.getCid() + "\n");
-            sb.append("LAC: " + loc.getLac() + "\n");
             sb.append("Device ID: " + tm.getDeviceId() + "\n");
             sb.append("Phone Number: " + tm.getLine1Number() + "\n");
             sb.append("Software Version: " + tm.getDeviceSoftwareVersion() + "\n");
-            sb.append("Network Operator: " + tm.getNetworkOperatorName() + "\n");
-            sb.append("Network Country Code: " + tm.getNetworkCountryIso() + "\n");
-            sb.append("Network Code: " + tm.getNetworkOperator() + "\n");
-            sb.append("SIM Operator Name: " + tm.getSimOperatorName() + "\n");
-            sb.append("SIM Op. Country Code: " + tm.getSimCountryIso() + "\n");
-            sb.append("SIM Operator Code: " + tm.getSimOperator() + "\n");
-            sb.append("SIM Serial No.: " + tm.getSimSerialNumber() + "\n");
-            sb.append("Subscriber ID: " + tm.getSubscriberId() + "\n");
-            sb.append("Network Type: " + getNetworkTypeString(tm.getNetworkType()) + "\n");
             sb.append("Phone Type: " + getPhoneTypeString(tm.getPhoneType()) + "\n");
+            sb.append("Cell ID: " + loc.getCid() + ", LAC: " + loc.getLac() + ", RSSI: " + -1 + ", Type: " + getNetworkTypeString(tm.getNetworkType()) + "\n");
+            sb.append("Network Operator: \"" + tm.getNetworkOperatorName() + "\", CC: " + tm.getNetworkCountryIso().toUpperCase() + ", Code: " + tm.getNetworkOperator() + "\n");
+            sb.append("SIM Operator Name: \"" + tm.getSimOperatorName() + "\", CC: " + tm.getSimCountryIso() + ", Code: " + tm.getSimOperator() + ", Serial No.: " + tm.getSimSerialNumber() + "\n");
+            sb.append("Subscriber ID: " + tm.getSubscriberId() + "\n");
 
             List<NeighboringCellInfo> cellinfo = tm.getNeighboringCellInfo();
 
             if (null != cellinfo) {
-                sb.append("Neighboring Cells:\n");
+                sb.append("Neighboring cells:\n");
 
                 for (NeighboringCellInfo info : cellinfo) {
-                    sb.append(" - CellID: " + info.getCid() + ", RSSI: " + info.getRssi() + ", Type: " + getNetworkTypeString(info.getNetworkType()) + "\n");
+                    sb.append(" - Cell ID: " + info.getCid() + ", LAC: " + info.getLac() + ", RSSI: " + info.getRssi() + ", Type: " + getNetworkTypeString(info.getNetworkType()) + "\n");
                 }
+            }
+
+            WifiManager wifiManager = (WifiManager)context.getSystemService(Activity.WIFI_SERVICE);
+
+            if (wifiManager.isWifiEnabled()) {
+                WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                int ip = wifiInfo.getIpAddress();
+                String ipString = String.format(
+                        "%d.%d.%d.%d",
+                        (ip & 0xff),
+                        (ip >> 8 & 0xff),
+                        (ip >> 16 & 0xff),
+                        (ip >> 24 & 0xff));
+
+                sb.append("WiFi SSID: " + wifiInfo.getSSID() + ",  BSSID: " + wifiInfo.getBSSID() + ", RSSI: " + wifiInfo.getRssi() + ", IP: " + ipString + ", MAC: " + wifiInfo.getMacAddress() + ", Speed: " + wifiInfo.getLinkSpeed() + " Mb/s\n");
+
+                if (wifiManager.startScan()) {
+                    try { Thread.sleep(1000); } catch(Exception ex) { }
+
+                    sb.append("Neighboring SSIDs:\n");
+                    List<ScanResult> results = wifiManager.getScanResults();
+                    for (ScanResult info : results) {
+                        sb.append(" - SSID: \"" + info.SSID + "\" " + info.capabilities + ", BSSID: " + info.BSSID + ", RSSI: " + info.level + ", Freq: " + info.frequency + " MHz\n");
+                    }
+                } else {
+                    sb.append("Could not start scan.");
+                }
+            } else {
+                sb.append("WiFi is not enabled for neighboring SSIDs.");
             }
         } else {
             sb.append("The specified subcommand is not valid for /device.");
@@ -696,14 +685,14 @@ public class PushReceiver extends BroadcastReceiver {
         List<Contact> contacts;
 
         try {
-            contacts = getContacts(context);
+            contacts = ContactTools.getContacts(context);
         } catch (Exception ex) {
             MainActivity.sendMessageAsync(context, sp, "send", "Error while reading contacts: " + ex.getClass().getName() + ": " + ex.getMessage());
             return;
         }
 
         sb.append("Search for contacts matching " + needle.trim() + ":\n");
-        String number = null;
+        Contact contact1 = null;
         int j = 0;
         for (Contact contact : contacts) {
             int idx;
@@ -713,14 +702,16 @@ public class PushReceiver extends BroadcastReceiver {
                 sb.append(j + ". " + contact.name.substring(0, idx) + "[" + contact.name.substring(idx, idx + needle.length()) + "]" + contact.name.substring(idx + needle.length()) + "\n");
 
                 if (sel == -1) {
-                    if (number == null) {
-                        number = contact.preferred.number;
+                    if (contact1 == null) {
+                        contact.selected = contact.preferred;
+                        contact1 = contact;
                     }
 
                     sb.append((contact.preferred.isDefault ? "Marked as default" : "First mobile or only") + " number: " + contact.preferred.number + "; ");
                 } else if (sel > 0 && sel <= contact.numbers.size()) {
-                    if (number == null) {
-                        number = contact.numbers.get(sel - 1).number;
+                    if (contact1 == null) {
+                        contact.selected = contact.numbers.get(sel - 1);
+                        contact1 = contact;
                     }
 
                     sb.append("Number behind specified index: " + contact.numbers.get(sel - 1).number + "; ");
@@ -750,8 +741,9 @@ public class PushReceiver extends BroadcastReceiver {
                 if ((idx = numObj.number.indexOf(needle)) != -1) {
                     j++;
 
-                    if (number == null) {
-                        number = numObj.number;
+                    if (contact1 == null) {
+                        contact.selected = numObj;
+                        contact1 = contact;
                     }
 
                     sb.append(j + ". " + contact.name + ":\nMatching number: " + numObj.number.substring(0, idx) + "[" + numObj.number.substring(idx, idx + needle.length()) + "]" + numObj.number.substring(idx + needle.length()) + "\n");
@@ -771,207 +763,19 @@ public class PushReceiver extends BroadcastReceiver {
         if (j == 0) {
             sb.setLength(0);
             sb.append("No contacts found matching " + arg.trim() + ".");
-        } else if (number != null) {
-        }
+        } else if (contact1 != null) {
+            Contact contact2 = ContactTools.findContact(context, needle, sel, false);
 
-        // test standalone search
-        INameCompare cmp = new INameCompare() {
-
-            @Override
-            public boolean compare(String a, String b)
-            {
-                return Normalizer.normalize(a.toLowerCase(), Normalizer.Form.NFKD).replaceAll("\\p{InCombiningDiacriticalMarks}+", "").toLowerCase().contains(b);
+            if ((contact1 == null && contact2 == null) || contact1.selected.number.contentEquals(contact2.selected.number)) {
+                if (contact2 != null) {
+                    sb.append("When specified to other commands, this name resolves to: " + contact2.selected.number);
+                }
+            } else {
+                sb.append("When specified to other commands, this name resolves to: " + contact2.selected.number + " [BUT should resolve to " + contact1.selected.number + ", probably. contact()/findContact() results differ.]");
             }
-
-        };
-        Tuple<String, String> number2 = resolveName(context, cmp, needle, sel);
-
-        if ((number == null && number2 == null) || number.contentEquals(number2.y)) {
-            if (number2 != null) {
-                sb.append("When specified to other commands, this name resolves to: " + number2.y);
-            }
-        } else {
-            sb.append("When specified to other commands, this name resolves to: " + number2.y + " [BUT should resolve to " + number + ", probably. contact()/resolveName() results differ.]");
         }
 
         MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
-    }
-
-    private interface INameCompare {
-
-        boolean compare(String a, String b);
-
-    }
-
-    private Tuple<String, String> resolveName(Context context, INameCompare cmp, String query, int sel)
-    {
-        Cursor cur = context.getContentResolver().query(ContactsContract.Contacts.CONTENT_URI, null, null, null, null);
-
-        if (cur == null) {
-            return null;
-        }
-
-        try {
-            while (cur.moveToNext()) {
-                String id = cur.getString(cur.getColumnIndex(ContactsContract.Contacts._ID));
-                String name = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
-
-                if (Integer.parseInt(cur.getString(cur.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER))) > 0) {
-                    Cursor pCur = context.getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?", new String[] { id }, null);
-
-                    if (pCur == null) {
-                        continue;
-                    }
-
-                    Contact.Number preferred = null;
-                    List<Contact.Number> numbers = new ArrayList<Contact.Number>();
-
-                    try {
-                        while (pCur.moveToNext()) {
-                            String number = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER));
-                            if (number == null || number.contentEquals("")) {
-                                number = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)).replaceAll("[^0-9\\+\\*#]", "");
-                            }
-
-                            int type = Integer.parseInt(pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.TYPE)));
-                            boolean isDef = Integer.parseInt(pCur.getString(pCur.getColumnIndex(ContactsContract.Data.IS_SUPER_PRIMARY))) > 0;
-                            boolean stop = false;
-
-                            if (numbers.size() >= 1) {
-                                for (Contact.Number num2 : numbers) {
-                                    if (num2.number.contentEquals(number)) {
-                                        if (isDef) {
-                                            num2.isDefault = true;
-                                            preferred = num2;
-                                        }
-
-                                        stop = true;
-                                    }
-                                }
-                            }
-
-                            if (stop) {
-                                continue;
-                            }
-
-                            Contact.Number numObj = new Contact.Number(number, "", isDef);
-                            numbers.add(numObj);
-
-                            if (isDef) {
-                                preferred = numObj;
-                            } else if (preferred == null && type == ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE) {
-                                preferred = numObj;
-                            }
-                        }
-
-                        if (preferred == null) {
-                            preferred = numbers.get(0);
-                        }
-                    } finally {
-                        pCur.close();
-                    }
-
-                    if (cmp.compare(name, query)) {
-                        if (sel == -1) {
-                            return new Tuple(name, preferred.number);
-                        } else if (sel > 0 && sel <= numbers.size()) {
-                            return new Tuple(name, numbers.get(sel - 1).number);
-                        }
-                    }
-
-                    for (Contact.Number numObj : numbers) {
-                        if (cmp.compare(numObj.number, query)) {
-                            return new Tuple(name, numObj.number);
-                        }
-                    }
-                }
-            }
-        } finally {
-            cur.close();
-        }
-
-        return null;
-    }
-
-    private List<Contact> getContacts(Context context)
-    {
-        List<Contact> contacts = new ArrayList<Contact>();
-
-        Cursor cur = context.getContentResolver().query(ContactsContract.Contacts.CONTENT_URI, null, null, null, null);
-
-        if (cur == null) {
-            return contacts;
-        }
-
-        try {
-            while (cur.moveToNext()) {
-                String id = cur.getString(cur.getColumnIndex(ContactsContract.Contacts._ID));
-                String key = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY));
-                String name = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
-
-                if (Integer.parseInt(cur.getString(cur.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER))) > 0) {
-                    Contact contact = new Contact(key, name);
-                    contacts.add(contact);
-
-                    Cursor pCur = context.getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?", new String[] { id }, null);
-
-                    if (pCur == null) {
-                        continue;
-                    }
-
-                    try {
-                        while (pCur.moveToNext()) {
-                            String number = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NORMALIZED_NUMBER));
-                            if (number == null || number.contentEquals("")) {
-                                number = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)).replaceAll("[^0-9\\+\\*#]", "");
-                            }
-
-                            int type = Integer.parseInt(pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.TYPE)));
-                            String typeStr = (String)ContactsContract.CommonDataKinds.Phone.getTypeLabel(context.getResources(), type, pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.LABEL)));
-                            boolean isDef = Integer.parseInt(pCur.getString(pCur.getColumnIndex(ContactsContract.Data.IS_SUPER_PRIMARY))) > 0;
-                            boolean stop = false;
-
-                            if (contact.numbers.size() >= 1) {
-                                for (Contact.Number num2 : contact.numbers) {
-                                    if (num2.number.contentEquals(number)) {
-                                        if (isDef) {
-                                            num2.isDefault = true;
-                                            contact.preferred = num2;
-                                        }
-
-                                        stop = true;
-                                    }
-                                }
-                            }
-
-                            if (stop) {
-                                continue;
-                            }
-
-                            Contact.Number numObj = contact.addNumber(number, typeStr, isDef);
-
-                            if (isDef) {
-                                contact.preferred = numObj;
-                            } else if (contact.preferred == null && type == ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE) {
-                                contact.preferred = numObj;
-                            }
-                        }
-
-                        if (contact.numbers.size() == 0) {
-                            contacts.remove(contact);
-                        } else if (contact.preferred == null) {
-                            contact.preferred = contact.numbers.get(0);
-                        }
-                    } finally {
-                        pCur.close();
-                    }
-                }
-            }
-        } finally {
-            cur.close();
-        }
-
-        return contacts;
     }
 
     private void turnGpsOn(Context context)

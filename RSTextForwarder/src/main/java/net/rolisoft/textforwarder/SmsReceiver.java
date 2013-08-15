@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.telephony.SmsMessage;
 import android.util.Log;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -72,7 +73,20 @@ public class SmsReceiver extends BroadcastReceiver {
                 messages.get(msgidx.get(from)).append(body);
             } else {
                 msgidx.put(from, messages.size());
-                messages.add(new TextMessage(from, (double)sms.getTimestampMillis() / 1000.0, body));
+
+                String sender;
+                Contact contact = ContactTools.findContact(context, from, true);
+                if (contact != null) {
+                    sender = ContactTools.createXmppAddrAutoSelCheck(context, contact);
+                } else {
+                    if (ContactTools.isPhoneNumber(from)) {
+                        sender = ContactTools.cleanNumber(from);
+                    } else {
+                        sender = ContactTools.createSlug(from);
+                    }
+                }
+
+                messages.add(new TextMessage(sender, (double)sms.getTimestampMillis() / 1000.0, body));
             }
         }
 
