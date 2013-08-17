@@ -19,11 +19,13 @@ public abstract class ContactTools {
 
     public static String formatNumber(Context context, String number)
     {
-        return number;
-
-        /*if (_cc == null) {
+        if (_cc == null) {
             TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
             _cc = tm.getSimCountryIso();
+
+            if (_cc == null) {
+                _cc = "us";
+            }
         }
 
         PhoneNumberUtil phoneUtil = PhoneNumberUtil.getInstance();
@@ -43,7 +45,7 @@ public abstract class ContactTools {
             fmt = phoneUtil.format(phoneNumber, PhoneNumberUtil.PhoneNumberFormat.NATIONAL);
         }
 
-        return fmt != null ? fmt : number;*/
+        return fmt != null ? fmt : number;
     }
 
     public static Contact findContact(Context context, String query, boolean fullOnly)
