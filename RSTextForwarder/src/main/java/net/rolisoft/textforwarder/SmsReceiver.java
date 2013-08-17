@@ -9,6 +9,8 @@ import android.os.Bundle;
 import android.telephony.SmsMessage;
 import android.util.Log;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -66,6 +68,7 @@ public class SmsReceiver extends BroadcastReceiver {
 
         for (int i = 0; i < pdu.length; i++) {
             SmsMessage sms = SmsMessage.createFromPdu((byte[])pdu[i]);
+
             String from = sms.getOriginatingAddress();
             String body = sms.getMessageBody();
 
@@ -74,15 +77,45 @@ public class SmsReceiver extends BroadcastReceiver {
             } else {
                 msgidx.put(from, messages.size());
 
-                String sender;
-                Contact contact = ContactTools.findContact(context, from, true);
-                if (contact != null) {
-                    sender = ContactTools.createXmppAddrAutoSelCheck(context, contact);
-                } else {
-                    if (ContactTools.isPhoneNumber(from)) {
-                        sender = ContactTools.cleanNumber(from);
-                    } else {
+                String sender = null;
+                boolean isAlpha = false, isNetSpec = false, refDone = false;
+
+                try {
+                    Field wrappedSmsMessageField = sms.getClass().getDeclaredField("mWrappedSmsMessage");
+                    wrappedSmsMessageField.setAccessible(true);
+                    Object wrappedSmsMessageValue = wrappedSmsMessageField.get(sms);
+
+                    Field originatingAddressField = wrappedSmsMessageValue.getClass().getSuperclass().getDeclaredField("originatingAddress");
+                    originatingAddressField.setAccessible(true);
+                    Object originatingAddressValue = originatingAddressField.get(wrappedSmsMessageValue);
+
+                    Class originatingAddressClass = originatingAddressValue.getClass();
+                    Method isAlphaMethod = originatingAddressClass.getDeclaredMethod("isAlphanumeric");
+                    isAlphaMethod.setAccessible(true);
+                    Method isNetSpecMethod = originatingAddressClass.getDeclaredMethod("isNetworkSpecific");
+                    isNetSpecMethod.setAccessible(true);
+
+                    isAlpha = (Boolean)isAlphaMethod.invoke(originatingAddressValue);
+                    isNetSpec = (Boolean)isNetSpecMethod.invoke(originatingAddressValue);
+                    refDone = true;
+                } catch (Exception ex) { }
+
+                if (refDone && (isAlpha || isNetSpec)) {
+                    if (isAlpha) {
                         sender = ContactTools.createSlug(from);
+                    } else if (isNetSpec) {
+                        sender = ContactTools.cleanNumber(from);
+                    }
+                } else {
+                    Contact contact = ContactTools.findContact(context, from, true);
+                    if (contact != null) {
+                        sender = ContactTools.createXmppAddrAutoSelCheck(context, contact);
+                    } else {
+                        if (ContactTools.isPhoneNumber(from)) {
+                            sender = ContactTools.cleanNumber(from);
+                        } else {
+                            sender = ContactTools.createSlug(from);
+                        }
                     }
                 }
 

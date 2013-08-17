@@ -3,6 +3,10 @@ package net.rolisoft.textforwarder;
 import android.content.Context;
 import android.database.Cursor;
 import android.provider.ContactsContract;
+import android.telephony.TelephonyManager;
+
+import com.google.i18n.phonenumbers.PhoneNumberUtil;
+import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -11,6 +15,36 @@ import java.util.List;
 public abstract class ContactTools {
 
     public static List<Contact> _contacts = null;
+    public static String _cc = null;
+
+    public static String formatNumber(Context context, String number)
+    {
+        return number;
+
+        /*if (_cc == null) {
+            TelephonyManager tm = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+            _cc = tm.getSimCountryIso();
+        }
+
+        PhoneNumberUtil phoneUtil = PhoneNumberUtil.getInstance();
+        PhoneNumber phoneNumber = null;
+
+        try {
+            phoneNumber = phoneUtil.parse(number, _cc);
+        } catch (Exception ex) {
+            return number;
+        }
+
+        String fmt, cc = phoneUtil.getRegionCodeForNumber(phoneNumber);
+
+        if (cc == null || !cc.equalsIgnoreCase(_cc)) {
+            fmt = phoneUtil.format(phoneNumber, PhoneNumberUtil.PhoneNumberFormat.INTERNATIONAL);
+        } else {
+            fmt = phoneUtil.format(phoneNumber, PhoneNumberUtil.PhoneNumberFormat.NATIONAL);
+        }
+
+        return fmt != null ? fmt : number;*/
+    }
 
     public static Contact findContact(Context context, String query, boolean fullOnly)
     {
@@ -89,7 +123,7 @@ public abstract class ContactTools {
 
     public static boolean isPhoneNumber(String number)
     {
-        return number.matches("[0-9]{3,}") && !number.matches("[A-Za-z]");
+        return number.matches(".*[0-9]{3,}.*") && !number.matches(".*[A-Za-z].*");
     }
 
     public static String cleanNumber(String number)

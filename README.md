@@ -84,6 +84,10 @@ To make sure your first match is the actual number you're looking for, you can p
 
 Every command that is not handled on the server side is pushed through GCM to the device. The client currently supports these commands:
 
+### /reject
+
+Rejects the incoming phone call.
+
 ### /contact *name*
 
 Lists the contacts that match the name or phone number fully or partially. Accepts `/N`.

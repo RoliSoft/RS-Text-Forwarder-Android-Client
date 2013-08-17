@@ -15,6 +15,7 @@ repositories {
 dependencies {
     compile 'com.android.support:support-v4:13.0.+'
     compile files('C:\\Program Files (x86)\\Android\\android-studio\\sdk\\extras\\google\\google_play_services\\libproject\\google-play-services_lib\\libs\\google-play-services.jar')
+    compile fileTree(dir: 'libs', include: '*.jar')
 }
 
 android {

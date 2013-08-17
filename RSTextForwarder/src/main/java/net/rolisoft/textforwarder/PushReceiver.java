@@ -43,6 +43,7 @@ import org.apache.http.NameValuePair;
 import org.apache.http.message.BasicNameValuePair;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.text.DecimalFormat;
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -58,7 +59,7 @@ public class PushReceiver extends BroadcastReceiver {
     }
 
     public enum Commands {
-        help, contact, whois, locate, device, track, apps, cmd, _null
+        help, contact, whois, locate, device, track, apps, cmd, reject, _null
     }
 
     @Override
@@ -150,7 +151,8 @@ public class PushReceiver extends BroadcastReceiver {
             case help:
                 MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n" +
                         "/contact *name*[/*index*] — Search through your address book.\n" +
-                        "/whois — When in dedicated window, reveals the destination contact." +
+                        "/whois — When in dedicated window, reveals the destination contact.\n" +
+                        "/reject — Rejects the incoming call.\n" +
                         "/device [info*|cpu] — Gets device information or current/min/max CPU speed.\n" +
                         "/apps [list [all|sys|user*]|run *app*|running*|ps] — Lists the currently installed/running applications or starts one if specified." +
                         "/cmd *cmd* — Runs a command on your device." +
@@ -182,11 +184,29 @@ public class PushReceiver extends BroadcastReceiver {
                 cmd(context, intent, sp, arg);
                 break;
 
+            case reject:
+                try {
+                    TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+                    Method getITelephonyMethod = telephonyManager.getClass().getDeclaredMethod("getITelephony");
+                    getITelephonyMethod.setAccessible(true);
+
+                    Object telephonyInterface = getITelephonyMethod.invoke(telephonyManager);
+                    Class telephonyInterfaceClass = telephonyInterface.getClass();
+
+                    Method endCallMethod = telephonyInterfaceClass.getDeclaredMethod("endCall");
+                    endCallMethod.invoke(telephonyInterface);
+
+                    MainActivity.sendMessageAsync(context, sp, "send", from, (!from.contentEquals("") ? "*** " : "") + "Rejected the incoming call.");
+                } catch (Exception ex) {
+                    MainActivity.sendMessageAsync(context, sp, "send", from, (!from.contentEquals("") ? "*** " : "") + "Error while rejecting call: " + ex.getClass().getName() + ": " + ex.getMessage());
+                }
+                break;
+
             case whois:
                 if (!from.contentEquals("")) {
                     Contact contact = ContactTools.resolveXmppAddr(context, from);
                     if (contact != null) {
-                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** All messages sent to this address will be forwarded to " + contact.name + " (" + contact.selected.number + ")");
+                        MainActivity.sendMessageAsync(context, sp, "send", from, "*** All messages sent to this address will be forwarded to " + contact.name + " via " + ContactTools.formatNumber(context, contact.selected.number) + ".");
                     } else {
                         MainActivity.sendMessageAsync(context, sp, "send", from, "*** Messages sent to this address will be discarded, because the contact name or phone number could not be resolved.");
                     }
@@ -232,7 +252,7 @@ public class PushReceiver extends BroadcastReceiver {
             return;
         }
 
-        MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " (" + contact.selected.number + ")");
+        MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " (" + ContactTools.formatNumber(context, contact.selected.number) + ")");
     }
 
     private void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
@@ -707,14 +727,14 @@ public class PushReceiver extends BroadcastReceiver {
                         contact1 = contact;
                     }
 
-                    sb.append((contact.preferred.isDefault ? "Marked as default" : "First mobile or only") + " number: " + contact.preferred.number + "; ");
+                    sb.append((contact.preferred.isDefault ? "Marked as default" : "First mobile or only") + " number: " + ContactTools.formatNumber(context, contact.preferred.number) + "; ");
                 } else if (sel > 0 && sel <= contact.numbers.size()) {
                     if (contact1 == null) {
                         contact.selected = contact.numbers.get(sel - 1);
                         contact1 = contact;
                     }
 
-                    sb.append("Number behind specified index: " + contact.numbers.get(sel - 1).number + "; ");
+                    sb.append("Number behind specified index: " + ContactTools.formatNumber(context, contact.numbers.get(sel - 1).number) + "; ");
                 } else {
                     sb.append("Specified index is out of bounds; ");
                 }
@@ -727,7 +747,7 @@ public class PushReceiver extends BroadcastReceiver {
                     int i = 0;
                     for (Contact.Number numObj : contact.numbers) {
                         i++;
-                        sb.append(" - " + i + ". " + numObj.number + "; " + numObj.type + (numObj.isDefault ? "; marked as default" : "") + "\n");
+                        sb.append(" - " + i + ". " + ContactTools.formatNumber(context, numObj.number) + "; " + numObj.type + (numObj.isDefault ? "; marked as default" : "") + "\n");
                     }
                 }
 
@@ -768,10 +788,10 @@ public class PushReceiver extends BroadcastReceiver {
 
             if ((contact1 == null && contact2 == null) || contact1.selected.number.contentEquals(contact2.selected.number)) {
                 if (contact2 != null) {
-                    sb.append("When specified to other commands, this name resolves to: " + contact2.selected.number);
+                    sb.append("When specified to other commands, this name resolves to: " + ContactTools.formatNumber(context, contact2.selected.number));
                 }
             } else {
-                sb.append("When specified to other commands, this name resolves to: " + contact2.selected.number + " [BUT should resolve to " + contact1.selected.number + ", probably. contact()/findContact() results differ.]");
+                sb.append("When specified to other commands, this name resolves to: " + ContactTools.formatNumber(context, contact2.selected.number) + " [BUT should resolve to " + ContactTools.formatNumber(context, contact1.selected.number) + ", probably. contact()/findContact() results differ.]");
             }
         }
 

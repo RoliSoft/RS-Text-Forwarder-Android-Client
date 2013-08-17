@@ -34,14 +34,20 @@
 
         <receiver android:name=".SmsReceiver">
             <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_RECEIVED" android:priority="-1000" />
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" android:priority="-999" />
             </intent-filter>
         </receiver>
 
         <receiver android:name=".MmsReceiver">
             <intent-filter>
-                <action android:name="android.provider.Telephony.WAP_PUSH_RECEIVED" android:priority="-1000" />
+                <action android:name="android.provider.Telephony.WAP_PUSH_RECEIVED" android:priority="-999" />
                 <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".CallReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" android:priority="-999" />
             </intent-filter>
         </receiver>
     </application>
@@ -62,5 +68,7 @@
     <uses-permission android:name="android.permission.WRITE_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
 </manifest>
