@@ -150,14 +150,14 @@ public class PushReceiver extends BroadcastReceiver {
         {
             case help:
                 MainActivity.sendMessageAsync(context, sp, "send", from, "List of supported commands by the client:\n" +
-                        "/contact *name*[/*index*] — Search through your address book.\n" +
-                        "/whois — When in dedicated window, reveals the destination contact.\n" +
-                        "/reject — Rejects the incoming call.\n" +
-                        "/device [info*|cpu] — Gets device information or current/min/max CPU speed.\n" +
-                        "/apps [list [all|sys|user*]|run *app*|running*|ps] — Lists the currently installed/running applications or starts one if specified." +
-                        "/cmd *cmd* — Runs a command on your device." +
-                        "/locate — Gets the last known network and GPS locations.\n" +
-                        "/track [start|stop|status*|provider|exploit] — Starts or stops tracking the device with the best provider.");
+                        "/contact *name*[/*index*] -- Search through your address book.\n" +
+                        "/whois -- When in dedicated window, reveals the destination contact.\n" +
+                        "/reject -- Rejects the incoming call.\n" +
+                        "/device [info*|cpu] -- Gets device information or current/min/max CPU speed.\n" +
+                        "/apps [list [all|sys|user*]|run *app*|running*|ps] -- Lists the currently installed/running applications or starts one if specified." +
+                        "/cmd *cmd* -- Runs a command on your device." +
+                        "/locate -- Gets the last known network and GPS locations.\n" +
+                        "/track [start|stop|status*|provider|exploit] -- Starts or stops tracking the device with the best provider.");
                 break;
 
             case device:

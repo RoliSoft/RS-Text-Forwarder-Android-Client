@@ -5,6 +5,7 @@ import android.accounts.AccountManager;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -14,6 +15,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.app.Activity;
 import android.support.v4.app.NotificationCompat;
+import android.util.Base64;
 import android.util.Log;
 import android.util.Patterns;
 import android.view.Menu;
@@ -43,6 +45,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.Signature;
+import java.security.spec.EncodedKeySpec;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -51,13 +62,14 @@ import java.util.Random;
 public class MainActivity extends Activity {
 
     public static final String AppID = "rstxtfwd";
-    public static final String API = "http://" + AppID + ".appspot.com/";
+    public static final String API = "https://" + AppID + ".appspot.com/";
 
     private final String TAG = this.toString();
     private static final String STAG = MainActivity.class.getName();
 
     private Menu _menu;
-    private SharedPreferences _sp;
+    private static SharedPreferences _sp;
+    private static PrivateKey _pk;
     private TextView _statusText;
 
     @Override
@@ -68,6 +80,7 @@ public class MainActivity extends Activity {
         _statusText = (TextView)findViewById(R.id.textView);
 
         refreshStatus();
+        PrngFix.apply();
 
         if (_sp.getString("reg_id", null) == null) {
             registerForGcmAsync();
@@ -131,34 +144,66 @@ public class MainActivity extends Activity {
 
     public void registerForGcmAsync()
     {
-        AsyncTask<Void, Void, String> asyncTask = new AsyncTask<Void, Void, String>() {
-            private Toast _toast;
+        AsyncTask<Void, String, String> asyncTask = new AsyncTask<Void, String, String>() {
+
+            private ProgressDialog _pd;
 
             @Override
-            protected String doInBackground(Void... voids) {
+            protected void onPreExecute()
+            {
+                _pd = new ProgressDialog(MainActivity.this);
+                _pd.setTitle("Registering...");
+                _pd.setMessage("Initializing...");
+                _pd.setCancelable(false);
+                _pd.setIndeterminate(true);
+                _pd.show();
+            }
+
+            @Override
+            protected String doInBackground(Void... voids)
+            {
                 Log.i(TAG, "Starting to register from GCM...");
 
                 GoogleCloudMessaging gcm = null;
 
                 try {
+                    publishProgress("Searching for user accounts...");
+
                     String email = findUserEmail(MainActivity.this);
                     if (email == null) {
                         Log.e(TAG, "Couldn't find the primary Google account's email address.");
                         return "Couldn't find the primary Google account's email address.";
                     }
 
+                    publishProgress("Registering for push messages...");
+
                     gcm = GoogleCloudMessaging.getInstance(MainActivity.this);
 
                     String regId = gcm.register("86714136760");
 
-                    JSONObject json = sendRequest("register", new ArrayList<NameValuePair>(Arrays.asList(
-                            new BasicNameValuePair("gacc", email),
-                            new BasicNameValuePair("email", _sp.getString("email", email)),
-                            new BasicNameValuePair("regid", regId)
-                    )));
-
                     //String email = "rolisoft@gmail.com";
                     //String regId = "n/a";
+
+                    publishProgress("Generating private key...");
+
+                    KeyPairGenerator keyPairGen = KeyPairGenerator.getInstance("RSA");
+                    keyPairGen.initialize(1024);
+                    KeyPair keyPair = keyPairGen.genKeyPair();
+                    String privKey = Base64.encodeToString(keyPair.getPrivate().getEncoded(), Base64.NO_WRAP);
+                    String pubKey  = Base64.encodeToString(keyPair.getPublic().getEncoded(), Base64.NO_WRAP);
+
+                    _pk = keyPair.getPrivate();
+
+                    publishProgress("Registering at gateway server...");
+
+                    JSONObject json = sendRequest(MainActivity.this, "register", new ArrayList<NameValuePair>(Arrays.asList(
+                            new BasicNameValuePair("gacc", email),
+                            new BasicNameValuePair("email", _sp.getString("email", email)),
+                            new BasicNameValuePair("regid", regId),
+                            new BasicNameValuePair("pbkey", pubKey)
+                    )));
+
+                    publishProgress("Saving preferences...");
 
                     if (_sp.getString("email", null) == null) {
                         _sp.edit().putString("email", email).commit();
@@ -166,6 +211,8 @@ public class MainActivity extends Activity {
 
                     _sp.edit().putString("g_acc", email).commit();
                     _sp.edit().putString("reg_id", regId).commit();
+                    _sp.edit().putString("priv_key", privKey).commit();
+                    _sp.edit().putLong("counter", 1).commit();
                     return "ok";
                 } catch (ServerError ex) {
                     Log.e(TAG, "Server-side error occurred while register for GCM.", ex);
@@ -181,14 +228,14 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            protected void onPreExecute() {
-                _toast = Toast.makeText(MainActivity.this, "Registering for GCM...", Toast.LENGTH_LONG);
-                _toast.show();
+            protected void onProgressUpdate(String... progress){
+                _pd.setMessage(progress[0]);
             }
 
             @Override
-            protected void onPostExecute(String str) {
-                _toast.cancel();
+            protected void onPostExecute(String str)
+            {
+                _pd.dismiss();
                 refreshStatus();
                 Toast.makeText(MainActivity.this, str == "ok" ? "Successfully registered for GCM." : str, str == "ok" ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
             }
@@ -304,8 +351,22 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    public static JSONObject sendRequest(String path, List<NameValuePair> postData) throws Exception
+    public static JSONObject sendRequest(Context context, String path, List<NameValuePair> postData) throws Exception
     {
+        if (_sp == null) {
+            _sp = context.getSharedPreferences("fwd", 0);
+        }
+
+        if (_pk == null) {
+            String encPrivateKey = _sp.getString("priv_key", "");
+
+            if (encPrivateKey.length() > 0) {
+                KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+                EncodedKeySpec encodedKeySpec = new PKCS8EncodedKeySpec(Base64.decode(encPrivateKey, Base64.NO_WRAP));
+                _pk = keyFactory.generatePrivate(encodedKeySpec);
+            }
+        }
+
         HttpParams httpParams = new BasicHttpParams();
         HttpProtocolParams.setContentCharset(httpParams, HTTP.UTF_8);
         HttpProtocolParams.setHttpElementCharset(httpParams, HTTP.UTF_8);
@@ -313,9 +374,22 @@ public class MainActivity extends Activity {
         DefaultHttpClient client = new DefaultHttpClient(httpParams);
         client.getParams().setParameter("http.protocol.content-charset", HTTP.UTF_8);
 
+        long counter = _sp.getLong("counter", 1) + 1;
+        _sp.edit().putLong("counter", counter).commit();
+        postData.add(new BasicNameValuePair("cntr", Long.toString(counter)));
+
         HttpPost post = new HttpPost(API + path);
         post.setEntity(new UrlEncodedFormEntity(postData, HTTP.UTF_8));
         post.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
+
+        if (_pk != null) {
+            byte[] data = URLDecoder.decode(EntityUtils.toString(post.getEntity(), "UTF-8"), "UTF-8").replaceAll("\\+", " ").getBytes("UTF-8");
+            Signature signature = Signature.getInstance("SHA1withRSA");
+            signature.initSign(_pk);
+            signature.update(data);
+            String key = Base64.encodeToString(signature.sign(), Base64.NO_WRAP);
+            post.setHeader("X-Key", key);
+        }
 
         HttpResponse resp = client.execute(post);
         JSONObject json = new JSONObject(EntityUtils.toString(resp.getEntity()));
@@ -336,7 +410,7 @@ public class MainActivity extends Activity {
         long st = System.currentTimeMillis();
 
         try {
-            return MainActivity.sendRequest(path, postData);
+            return MainActivity.sendRequest(context, path, postData);
         } catch (ServerError ex) {
             Log.e(STAG, "Server-side error occurred while contacting API.", ex);
             MainActivity.displayNotification(context, "Request to " + path + " failed", "Server error: " + ex.getClass().getName() + ": " + ex.getMessage());

@@ -173,7 +173,11 @@ The app will automatically suspend itself when there is no internet connection, 
 
 ## Security
 
-Stronger authentication is planned, however encryption is not. Get an SSL certificate if you want to encrypt the traffic between the phone and the AppEngine server.
+Upon pairing the device with the server, the device generates a 1024-bit RSA key and sends the public key to the server. A user-associated counter is also set to zero on the server side.
+
+When sending a message, the device will sign the request with its private key and increase the counter. The server checks the signature with the public key and that the counter is higher than in the previous request. This eliminates impersonations and replay attacks.
+
+Encryption is not currently implemented due to the fact that all the connections are SSL-encrypted between the device and server. However, if you roll your own server without SSL, or don't trust SSL, you can quickly implement an encryption that encrypts the sensitive form variables using the RSA key. (However, it is generally not a good idea to encrypt directly with the RSA key. You should instead generate a random 256-bit key for AES and use that for encryption, then communicate this key to the device by encrypting it with the public RSA key. This is also how SSL works.)
 
 Beware, the `AppEngine server` -> `Google's XMPP server` -> `your provider's XMPP server` -> `your client` route and vice versa is not encrypted, and there might be nothing you can do about it. But then again, you shouldn't be sharing sensitive information through SMS to begin with...
 

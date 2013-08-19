@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="libphonenumber-5.7">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/RSTextForwarder/libs/libphonenumber-5.7.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
