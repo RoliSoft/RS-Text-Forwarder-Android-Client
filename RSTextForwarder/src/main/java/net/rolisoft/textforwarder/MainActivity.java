@@ -212,7 +212,7 @@ public class MainActivity extends Activity {
                     _sp.edit().putString("g_acc", email).commit();
                     _sp.edit().putString("reg_id", regId).commit();
                     _sp.edit().putString("priv_key", privKey).commit();
-                    _sp.edit().putLong("counter", 1).commit();
+                    _sp.edit().putLong("counter", System.currentTimeMillis()).commit();
                     return "ok";
                 } catch (ServerError ex) {
                     Log.e(TAG, "Server-side error occurred while register for GCM.", ex);
@@ -374,21 +374,25 @@ public class MainActivity extends Activity {
         DefaultHttpClient client = new DefaultHttpClient(httpParams);
         client.getParams().setParameter("http.protocol.content-charset", HTTP.UTF_8);
 
-        long counter = _sp.getLong("counter", 1) + 1;
-        _sp.edit().putLong("counter", counter).commit();
-        postData.add(new BasicNameValuePair("cntr", Long.toString(counter)));
-
         HttpPost post = new HttpPost(API + path);
         post.setEntity(new UrlEncodedFormEntity(postData, HTTP.UTF_8));
         post.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
 
         if (_pk != null) {
-            byte[] data = URLDecoder.decode(EntityUtils.toString(post.getEntity(), "UTF-8"), "UTF-8").replaceAll("\\+", " ").getBytes("UTF-8");
+            long counter = System.currentTimeMillis();
+            long lastctr = _sp.getLong("counter", counter - 1);
+            if (counter <= lastctr) {
+                counter = lastctr + 1;
+            }
+            _sp.edit().putLong("counter", counter).commit();
+
+            byte[] data = URLDecoder.decode(counter + "&" + EntityUtils.toString(post.getEntity(), "UTF-8"), "UTF-8").replaceAll("\\+", " ").getBytes("UTF-8");
             Signature signature = Signature.getInstance("SHA1withRSA");
             signature.initSign(_pk);
             signature.update(data);
             String key = Base64.encodeToString(signature.sign(), Base64.NO_WRAP);
-            post.setHeader("X-Key", key);
+
+            post.setHeader("X-Signature", Long.toString(counter, 36) + " " + key);
         }
 
         HttpResponse resp = client.execute(post);

@@ -252,7 +252,7 @@ public class PushReceiver extends BroadcastReceiver {
             return;
         }
 
-        MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " (" + ContactTools.formatNumber(context, contact.selected.number) + ")");
+        MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " via " + ContactTools.formatNumber(context, contact.selected.number) + ".");
     }
 
     private void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
@@ -317,8 +317,8 @@ public class PushReceiver extends BroadcastReceiver {
             sb.append("Phone Type: " + getPhoneTypeString(tm.getPhoneType()) + "\n");
             sb.append("Cell ID: " + loc.getCid() + ", LAC: " + loc.getLac() + ", RSSI: " + -1 + ", Type: " + getNetworkTypeString(tm.getNetworkType()) + "\n");
             sb.append("Network Operator: \"" + tm.getNetworkOperatorName() + "\", CC: " + tm.getNetworkCountryIso().toUpperCase() + ", Code: " + tm.getNetworkOperator() + "\n");
-            sb.append("SIM Operator Name: \"" + tm.getSimOperatorName() + "\", CC: " + tm.getSimCountryIso() + ", Code: " + tm.getSimOperator() + ", Serial No.: " + tm.getSimSerialNumber() + "\n");
-            sb.append("Subscriber ID: " + tm.getSubscriberId() + "\n");
+            sb.append("SIM Operator Name: \"" + tm.getSimOperatorName() + "\", CC: " + tm.getSimCountryIso().toUpperCase() + ", Code: " + tm.getSimOperator() + "\n");
+            sb.append("SIM Serial No.: " + tm.getSimSerialNumber() + ", Subscriber ID: " + tm.getSubscriberId() + "\n");
 
             List<NeighboringCellInfo> cellinfo = tm.getNeighboringCellInfo();
 
