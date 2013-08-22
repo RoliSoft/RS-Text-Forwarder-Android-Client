@@ -12,18 +12,26 @@ import android.util.Log;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 
+import java.util.List;
+
 public class CallReceiver extends BroadcastReceiver {
 
     private final String TAG = this.toString();
+    private static final String STAG = CallReceiver.class.toString();
 
     @Override
     public void onReceive(final Context context, Intent intent)
     {
         Log.i(TAG, "Received phone state broadcast...");
+        BackgroundIntentService.start(context, intent, BackgroundIntentService.CALL_RECEIVED);
+        setResultCode(Activity.RESULT_OK);
+    }
 
-        final SharedPreferences sp = context.getSharedPreferences("fwd", 0);
+    public static void handle(Context context, Intent intent)
+    {
+        SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || !sp.getBoolean("forward_call", true) || !MainActivity.isConnectedToInternet(context)) {
-            Log.w(TAG, "Forwarding disabled or no internet connection.");
+            Log.w(STAG, "Forwarding disabled or no internet connection.");
             return;
         }
 
@@ -56,13 +64,11 @@ public class CallReceiver extends BroadcastReceiver {
 
             MainActivity.sendMessageAsync(context, sp, "send", sb.toString());
         } catch (Exception ex) {
-            Log.e(TAG, "Error while extracting phone state from intent.", ex);
+            Log.e(STAG, "Error while extracting phone state from intent.", ex);
             MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
             WakeLocker.popd();
         }
-
-        setResultCode(Activity.RESULT_OK);
     }
 
 }

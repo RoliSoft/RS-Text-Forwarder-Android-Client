@@ -102,21 +102,28 @@ This command only works in the dedicated chat window. Its purpose is to return t
 
 Returns some miscellaneous device information, such as IMEI, cell towers, etc. When `cpu` is specified, returns the current clock speed and the min/max for the selected CPU governor.
 
-### /cmd *cmd*
+### /sh *cmd*
 
-Runs a command on the device and returns its content. This is very primitive as of now, and if the launched process wants input, the `Intent` will lock up and Android will show a force close dialog after a while. Until you don't force close it, further messages will not be processed.
+Runs a command on the device and returns its content. This command was initially `/cmd`, however the implementation changed to use [libsuperuser](http://su.chainfire.eu/#lib).
 
-    [06:17] RoliSoft: /cmd cat /proc/cpuinfo
+    [06:17] RoliSoft: /sh cat /proc/cpuinfo
     [06:17] rstxtfwd@appspot.com: Pushing command cmd to device...
     [06:17] rstxtfwd@appspot.com: Processor: ARMv7 Processor rev 2 (v7l) [...]
 
-To run a command under root, use `su -c`:
+To run a command under root, you had to use `su -c` with the old `/cmd` command, however a new command has been introduced under `/su` and `/sh su -c` is now deprecated as it was bad practice and a nasty hack when it was introduced.
 
-    [06:21] RoliSoft: /cmd su -c df
-    [06:21] rstxtfwd@appspot.com: Pushing command cmd to device...
-    [06:21] rstxtfwd@appspot.com: Filesystem               Size     Used     Free   Blksize [...]
+### /su *cmd*
 
-You will have to allow superuser rights on the device the first time you try to use `su` within the app.
+Runs a command on the device as root and returns its content. You will have to allow superuser rights on the device the first time you try to use `su` within the app.
+
+    [19:31] RoliSoft: /sh whoami
+    [19:31] rstxtfwd@appspot.com: Pushing command sh to device...
+    [19:31] rstxtfwd@appspot.com: u0_a157
+    [19:31] RoliSoft: /su whoami
+    [19:31] rstxtfwd@appspot.com: Pushing command su to device...
+    [19:31] rstxtfwd@appspot.com: root
+
+You should be careful when running commands as root. I am not responsible if you erase your bootloader by running `dd if=/dev/zero of=/dev/block/mmcblk0p5` completely out of curiousity.
 
 ### /apps [list [all|sys|user*]|run *app*|running*|ps]
 

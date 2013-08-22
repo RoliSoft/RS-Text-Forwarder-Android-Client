@@ -50,16 +50,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import eu.chainfire.libsuperuser.Shell;
+
 public class PushReceiver extends BroadcastReceiver {
 
     private final String TAG = this.toString();
+    private static final String STAG = PushReceiver.class.toString();
 
     public enum Actions {
         cmd, ping, text, chat, _null
     }
 
     public enum Commands {
-        help, contact, whois, locate, device, track, apps, cmd, reject, _null
+        help, contact, whois, locate, device, track, apps, sh, su, reject, _null
     }
 
     @Override
@@ -67,26 +70,44 @@ public class PushReceiver extends BroadcastReceiver {
     {
         Log.i(TAG, "Received push notification...");
 
+        GoogleCloudMessaging gcm = null;
+
+        try {
+            gcm = GoogleCloudMessaging.getInstance(context);
+            intent.putExtra("__gcm_msgtype", gcm.getMessageType(intent));
+        } catch (Exception ex) {
+            intent.putExtra("__gcm_msgtype", "error");
+        } finally {
+            if (gcm != null) {
+                gcm.close();
+            }
+        }
+
+        BackgroundIntentService.start(context, intent, BackgroundIntentService.PUSH_RECEIVED);
+        setResultCode(Activity.RESULT_OK);
+    }
+
+    public static void handle(Context context, Intent intent)
+    {
         SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || sp.getString("reg_id", null) == null || !MainActivity.isConnectedToInternet(context)) {
-            Log.w(TAG, "Push rejected because forwarding is disabled or GCM ID is unknown.");
+            Log.w(STAG, "Push rejected because forwarding is disabled or GCM ID is unknown.");
             return;
         }
 
         WakeLocker.pushd(context);
-        GoogleCloudMessaging gcm = GoogleCloudMessaging.getInstance(context);
 
         try {
             String action = intent.getStringExtra("action");
-            String msgType = gcm.getMessageType(intent);
+            String msgType = intent.getStringExtra("__gcm_msgtype");
 
             if (!msgType.contentEquals("gcm")) {
-                Log.w(TAG, "Push rejected because message type '" + msgType + "' is not supported.");
+                Log.w(STAG, "Push rejected because message type '" + msgType + "' is not supported.");
                 MainActivity.displayNotification(context, "Push failed", "Received message type: " + msgType);
                 return;
             }
 
-            Log.i(TAG, "Push message requests action '" + action + "'.");
+            Log.i(STAG, "Push message requests action '" + action + "'.");
 
             Actions actEn;
             try { actEn = Actions.valueOf(action); } catch (Exception ex) { actEn = Actions._null; }
@@ -99,9 +120,9 @@ public class PushReceiver extends BroadcastReceiver {
 
                 case ping:
                     MainActivity.sendRequestAsync(context, "pingback", new ArrayList<NameValuePair>(Arrays.asList(
-                        new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
-                        new BasicNameValuePair("time", intent.getStringExtra("time")),
-                        new BasicNameValuePair("from", intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "")
+                            new BasicNameValuePair("gacc", sp.getString("g_acc", null)),
+                            new BasicNameValuePair("time", intent.getStringExtra("time")),
+                            new BasicNameValuePair("from", intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "")
                     )));
                     break;
 
@@ -123,17 +144,14 @@ public class PushReceiver extends BroadcastReceiver {
                     break;
             }
         } catch (Exception ex) {
-            Log.e(TAG, "Error while processing push notification.", ex);
+            Log.e(STAG, "Error while processing push notification.", ex);
             MainActivity.displayNotification(context, "Push failed", ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
-            gcm.close();
             WakeLocker.popd();
         }
-
-        setResultCode(Activity.RESULT_OK);
     }
 
-    private void handleCmd(final Context context, final Intent intent, final SharedPreferences sp)
+    private static void handleCmd(final Context context, final Intent intent, final SharedPreferences sp)
     {
         WakeLocker.push(context);
 
@@ -141,7 +159,7 @@ public class PushReceiver extends BroadcastReceiver {
         final String arg = intent.getStringExtra("arg");
         final String from = intent.hasExtra("_addr") ? intent.getStringExtra("_addr") : "";
 
-        Log.i(TAG, "Command handler called with command '" + cmd + "'.");
+        Log.i(STAG, "Command handler called with command '" + cmd + "'.");
 
         Commands cmdEn;
         try { cmdEn = Commands.valueOf(cmd); } catch (Exception ex) { cmdEn = Commands._null; }
@@ -155,7 +173,8 @@ public class PushReceiver extends BroadcastReceiver {
                         "/reject -- Rejects the incoming call.\n" +
                         "/device [info*|cpu] -- Gets device information or current/min/max CPU speed.\n" +
                         "/apps [list [all|sys|user*]|run *app*|running*|ps] -- Lists the currently installed/running applications or starts one if specified." +
-                        "/cmd *cmd* -- Runs a command on your device." +
+                        "/sh *cmd* -- Runs a command on your device." +
+                        "/su *cmd* -- Runs a command on your device as root." +
                         "/locate -- Gets the last known network and GPS locations.\n" +
                         "/track [start|stop|status*|provider|exploit] -- Starts or stops tracking the device with the best provider.");
                 break;
@@ -180,8 +199,9 @@ public class PushReceiver extends BroadcastReceiver {
                 apps(context, intent, sp, arg);
                 break;
 
-            case cmd:
-                cmd(context, intent, sp, arg);
+            case sh:
+            case su:
+                cmd(context, intent, sp, arg, cmdEn == Commands.su);
                 break;
 
             case reject:
@@ -223,7 +243,7 @@ public class PushReceiver extends BroadcastReceiver {
         WakeLocker.pop();
     }
 
-    private void chat(final Context context, final Intent intent, final SharedPreferences sp)
+    private static void chat(final Context context, final Intent intent, final SharedPreferences sp)
     {
         String with = intent.getStringExtra("with");
         String needle = with.trim();
@@ -255,7 +275,7 @@ public class PushReceiver extends BroadcastReceiver {
         MainActivity.sendMessageAsync(context, sp, "send", ContactTools.createXmppAddrCheck(context, contact, sel), "*** All messages sent to this address will be forwarded to " + contact.name + " via " + ContactTools.formatNumber(context, contact.selected.number) + ".");
     }
 
-    private void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    private static void device(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         StringBuilder sb = new StringBuilder();
 
@@ -266,41 +286,49 @@ public class PushReceiver extends BroadcastReceiver {
 
             sb.append("Current CPU speed: ");
 
-            try {
-                cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")) / 1000;
-                if (cur >= 1000) {
-                    sb.append(dfg.format((float)cur / 1000.0));
-                } else {
-                    sb.append(dfm.format(cur));
+            for (int i = 0; i < 1024; i++) { // this is bad.
+                try {
+                    cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq").trim()) / 1000;
+                    if (i != 0) {
+                        sb.append(" / ");
+                    }
+                    if (cur >= 1000) {
+                        sb.append(dfg.format((float)cur / 1000.0));
+                    } else {
+                        sb.append(dfm.format(cur));
+                    }
+                } catch (Exception ex) {
+                    if (i == 0) {
+                        Log.e(STAG, "Error while reading CPU speed.", ex);
+                    }
+                    break;
                 }
-            } catch (Exception ex) {
-                Log.e(TAG, "Error while reading CPU speed.", ex);
             }
 
             sb.append(" [");
 
             try {
-                min = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq")) / 1000;
+                min = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq").trim()) / 1000;
                 if (min >= 1000) {
                     sb.append(dfg.format((float)min / 1000.0));
                 } else {
                     sb.append(dfm.format(min));
                 }
             } catch (Exception ex) {
-                Log.e(TAG, "Error while reading CPU speed.", ex);
+                Log.e(STAG, "Error while reading CPU speed.", ex);
             }
 
             sb.append(", ");
 
             try {
-                max = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")) / 1000;
+                max = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").trim()) / 1000;
                 if (max >= 1000) {
                     sb.append(dfg.format((float)max / 1000.0));
                 } else {
                     sb.append(dfm.format(max));
                 }
             } catch (Exception ex) {
-                Log.e(TAG, "Error while reading CPU speed.", ex);
+                Log.e(STAG, "Error while reading CPU speed.", ex);
             }
 
             sb.append("]");
@@ -370,7 +398,7 @@ public class PushReceiver extends BroadcastReceiver {
     private static long _lu = 0;
     private static String _lp = "";
 
-    private void locate(final Context context, final Intent intent, final SharedPreferences sp)
+    private static void locate(final Context context, final Intent intent, final SharedPreferences sp)
     {
         if (_lm == null) {
             _lm = (LocationManager)context.getSystemService(Context.LOCATION_SERVICE);
@@ -406,7 +434,7 @@ public class PushReceiver extends BroadcastReceiver {
         MainActivity.sendMessageAsync(context, sp, "send", body);
     }
 
-    private void track(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    private static void track(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         if (arg.length() > 0 && !arg.contentEquals("start") && !arg.contentEquals("stop") && !arg.contentEquals("provider") && !arg.contentEquals("exploit") && !arg.contentEquals("status")) {
             MainActivity.sendMessageAsync(context, sp, "send", "The specified subcommand is not valid for /track.");
@@ -538,7 +566,7 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private String getBestProvider()
+    private static String getBestProvider()
     {
         if (_lm == null) {
             return null;
@@ -571,7 +599,7 @@ public class PushReceiver extends BroadcastReceiver {
         return null;
     }
 
-    private void apps(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    private static void apps(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         StringBuilder sb = new StringBuilder();
 
@@ -662,7 +690,7 @@ public class PushReceiver extends BroadcastReceiver {
         MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
     }
 
-    private void cmd(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    private static void cmd(final Context context, final Intent intent, final SharedPreferences sp, final String arg, final boolean root)
     {
         StringBuilder sb = new StringBuilder();
 
@@ -670,7 +698,17 @@ public class PushReceiver extends BroadcastReceiver {
             sb.append("No command specified to run.");
         } else {
             try {
-                sb.append(MainActivity.runAndRead(arg));
+                List<String> output;
+
+                if (root) {
+                    output = Shell.SU.run(arg);
+                } else {
+                    output = Shell.SH.run(arg);
+                }
+
+                for (String line : output) {
+                    sb.append(line + "\n");
+                }
             } catch (Exception ex) {
                 sb.append("Error while running '" + arg + "': " + ex.getClass().getName() + ": " + ex.getMessage());
             }
@@ -679,7 +717,7 @@ public class PushReceiver extends BroadcastReceiver {
         MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
     }
 
-    private void contact(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
+    private static void contact(final Context context, final Intent intent, final SharedPreferences sp, final String arg)
     {
         StringBuilder sb = new StringBuilder();
 
@@ -798,7 +836,7 @@ public class PushReceiver extends BroadcastReceiver {
         MainActivity.sendMessageAsync(context, sp, "send", sb.toString().trim());
     }
 
-    private void turnGpsOn(Context context)
+    private static void turnGpsOn(Context context)
     {
         String provider = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.LOCATION_PROVIDERS_ALLOWED);
 
@@ -811,7 +849,7 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private void turnGpsOff(Context context)
+    private static void turnGpsOff(Context context)
     {
         String provider = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.LOCATION_PROVIDERS_ALLOWED);
 
@@ -824,7 +862,7 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private String getNetworkTypeString(int type)
+    private static String getNetworkTypeString(int type)
     {
         switch (type) {
             case 7: return "1xRTT";
@@ -846,7 +884,7 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private String getPhoneTypeString(int type)
+    private static String getPhoneTypeString(int type)
     {
         switch (type)
         {
@@ -857,7 +895,7 @@ public class PushReceiver extends BroadcastReceiver {
         }
     }
 
-    private String getLocationProviderStatusString(int type)
+    private static String getLocationProviderStatusString(int type)
     {
         switch (type)
         {

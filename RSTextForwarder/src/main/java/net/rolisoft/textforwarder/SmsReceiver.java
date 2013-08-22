@@ -19,16 +19,22 @@ import java.util.Map;
 
 public class SmsReceiver extends BroadcastReceiver {
 
-    private final String TAG = this.toString();
+    private final String TAG  = this.toString();
+    private static final String STAG = SmsReceiver.class.toString();
 
     @Override
-    public void onReceive(final Context context, Intent intent)
+    public void onReceive(Context context, Intent intent)
     {
         Log.i(TAG, "Received SMS broadcast...");
+        BackgroundIntentService.start(context, intent, BackgroundIntentService.SMS_RECEIVED);
+        setResultCode(Activity.RESULT_OK);
+    }
 
-        final SharedPreferences sp = context.getSharedPreferences("fwd", 0);
+    public static void handle(Context context, Intent intent)
+    {
+        SharedPreferences sp = context.getSharedPreferences("fwd", 0);
         if (!sp.getBoolean("forward", true) || !sp.getBoolean("forward_sms", true) || !MainActivity.isConnectedToInternet(context)) {
-            Log.w(TAG, "Forwarding disabled or no internet connection.");
+            Log.w(STAG, "Forwarding disabled or no internet connection.");
             return;
         }
 
@@ -41,13 +47,11 @@ public class SmsReceiver extends BroadcastReceiver {
                 MainActivity.sendMessageAsync(context, sp, "send", msg.from, msg.body);
             }
         } catch (Exception ex) {
-            Log.e(TAG, "Error while extracting messages from intent.", ex);
+            Log.e(STAG, "Error while extracting messages from intent.", ex);
             MainActivity.displayNotification(context, "Request to send failed", "Local error: " + ex.getClass().getName() + ": " + ex.getMessage());
         } finally {
             WakeLocker.popd();
         }
-
-        setResultCode(Activity.RESULT_OK);
     }
 
     public static List<TextMessage> getMessagesFrom(Context context, Intent intent)

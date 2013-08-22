@@ -50,6 +50,8 @@
                 <action android:name="android.intent.action.PHONE_STATE" android:priority="-999" />
             </intent-filter>
         </receiver>
+
+        <service android:name=".BackgroundIntentService" />
     </application>
 
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
