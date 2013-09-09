@@ -172,9 +172,9 @@ public class PushReceiver extends BroadcastReceiver {
                         "/whois -- When in dedicated window, reveals the destination contact.\n" +
                         "/reject -- Rejects the incoming call.\n" +
                         "/device [info*|cpu] -- Gets device information or current/min/max CPU speed.\n" +
-                        "/apps [list [all|sys|user*]|run *app*|running*|ps] -- Lists the currently installed/running applications or starts one if specified." +
-                        "/sh *cmd* -- Runs a command on your device." +
-                        "/su *cmd* -- Runs a command on your device as root." +
+                        "/apps [list [all|sys|user*]|run *app*|running*|ps] -- Lists the currently installed/running applications or starts one if specified.\n" +
+                        "/sh *cmd* -- Runs a command on your device.\n" +
+                        "/su *cmd* -- Runs a command on your device as root.\n" +
                         "/locate -- Gets the last known network and GPS locations.\n" +
                         "/track [start|stop|status*|provider|exploit] -- Starts or stops tracking the device with the best provider.");
                 break;
@@ -288,11 +288,16 @@ public class PushReceiver extends BroadcastReceiver {
 
             for (int i = 0; i < 1024; i++) { // this is bad.
                 try {
-                    cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq").trim()) / 1000;
+                    cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu" + i + "/online").trim());
+                    if (cur == 1) {
+                        cur = Integer.parseInt(MainActivity.readFile("/sys/devices/system/cpu/cpu" + i + "/cpufreq/scaling_cur_freq").trim()) / 1000;
+                    }
                     if (i != 0) {
                         sb.append(" / ");
                     }
-                    if (cur >= 1000) {
+                    if (cur == 0) {
+                        sb.append("offline");
+                    } else if (cur >= 1000) {
                         sb.append(dfg.format((float)cur / 1000.0));
                     } else {
                         sb.append(dfm.format(cur));
